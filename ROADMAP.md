@@ -119,6 +119,7 @@ Tudo a partir da **base de dados de cada cliente**, apresentado de forma acessí
   - **sem vendas em permuta** (local 25), como o relatório;
   - CMV pelo "Custo total", como o ERP;
   - dados por dia e vendedor. Conferido na base de teste: venda, CMV e número de vendas iguais aos das tabelas do ERP.
+- [x] Comercial: interruptor "Desconsiderar permutas" (padrão ligado). A permuta vem separada (coluna `Permuta` na `LV_Comercial`); o relatório "Metas" do ERP tira a permuta no mês, mas não no ano anterior. Aparece quem tem meta ou vendeu no mês; totais somam todos
 - [ ] Comercial: meta no Painel; curva ABC de clientes e produtos; comparação com o mesmo mês do ano anterior por vendedor; conferir no cliente piloto com o relatório "Metas" do ERP
 - [x] **Tela Comercial (indicadores de gestão comercial)** (primeira versão feita: ver "Módulo Comercial" acima) — mesmo esquema da DRE: SQL cadastrado pela Vogel, resultado guardado no portal, gestor atualiza, cliente só consulta
   - Vendas: faturamento (mês, ano anterior, acumulado), ticket médio, nº de vendas, vendas por vendedor/filial/dia da semana — `Documentos Fiscais` + itens

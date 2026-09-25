@@ -184,6 +184,17 @@ public static class AutoTeste
         Checar("Metas: estrutura com cota zero e sem vendas é 'zerada'; com meta e sem venda (D) ou com venda (A) não é",
             comZerada.Vendedores.Single(v => v.Vendedor == "Z").Zerada && !comZerada.Vendedores.Single(v => v.Vendedor == "D").Zerada
             && !comZerada.Vendedores.Single(v => v.Vendedor == "A").Zerada);
+        var soAnoAnterior = ComercialResumo.Montar(d11, [.. vendasMetas, Vd("X", new DateOnly(2025, 9, 3), 800, 0, 400, 2, 2)], metasTeste, feriadosTeste);
+        Checar("Metas: sem meta e sem venda no mês (só ano anterior) não aparece, mas o ano anterior entra no total, como no ERP",
+            soAnoAnterior.Vendedores.Single(v => v.Vendedor == "X").Zerada && soAnoAnterior.Total.AnoAnterior.Venda == 4800m);
+        var tabelaComercial = new System.Data.DataTable();
+        foreach (var c in new[] { "Data", "Vendedor", "VendaBruta", "Permuta" }) tabelaComercial.Columns.Add(c, c == "Vendedor" ? typeof(string) : typeof(object));
+        tabelaComercial.Rows.Add(new DateTime(2026, 8, 3), "A", 100m, 1);
+        tabelaComercial.Rows.Add(new DateTime(2026, 8, 3), "A", 50m, 0);
+        var lidasComercial = ImportacaoDados.VendasVendedores(tabelaComercial, 1);
+        var semColuna = ImportacaoDados.VendasVendedores(new System.Data.DataView(tabelaComercial).ToTable(false, "Data", "Vendedor", "VendaBruta"), 1);
+        Checar("Comercial: coluna Permuta separa as vendas em permuta; SQL antigo (sem a coluna) = tudo sem permuta",
+            lidasComercial.Count(v => v.Permuta) == 1 && lidasComercial.Single(v => v.Permuta).VendaBruta == 100m && semColuna.All(v => !v.Permuta));
         var soComCota = ComercialResumo.Montar(d11, vendasMetas, metasTeste, feriadosTeste, somente: new HashSet<string> { "A" });
         Checar("Metas: filtro 'só quem tem meta no ERP' mostra só esses e os totais somam só eles",
             soComCota.Vendedores.Select(v => v.Vendedor).SequenceEqual(["A"]) && soComCota.Total is { Acumulado.Venda: 5000m, MetaMes: 25000m });

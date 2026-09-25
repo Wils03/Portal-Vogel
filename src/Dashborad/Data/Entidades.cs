@@ -324,6 +324,9 @@ public class VendaVendedor
 
     /// <summary>Itens vendidos (linhas dos documentos).</summary>
     public int Itens { get; set; }
+
+    /// <summary>Vendas com local de pagamento PERMUTA (o Comercial pode desconsiderá-las, como o relatório "Metas" do ERP).</summary>
+    public bool Permuta { get; set; }
 }
 
 /// <summary>

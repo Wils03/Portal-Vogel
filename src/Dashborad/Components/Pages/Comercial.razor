@@ -91,10 +91,13 @@ else
         <div class="cartao">
             <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
                 <h2 class="h5 m-0 me-auto">Vendedores</h2>
+                <div class="form-check form-switch m-0" title="Tira as vendas com local de pagamento PERMUTA, como o relatório Metas do ERP (que tira no mês, mas não no ano anterior).">
+                    <input class="form-check-input" type="checkbox" role="switch" id="semPermuta" @bind="semPermuta" @bind:after="Carregar" /><label class="form-check-label small" for="semPermuta">Desconsiderar permutas</label>
+                </div>
                 <div class="form-check m-0"><input class="form-check-input" type="checkbox" id="porGerente" @bind="porGerente" /><label class="form-check-label small" for="porGerente">Agrupar por gerente</label></div>
                 @if (comCotaErp > 0)
                 {
-                    <span class="small text-muted dica" title="Como o relatório Metas do ERP: só as estruturas de venda com cota no mês (Cotas de Vendas). As demais não fazem parte das vendas; totais e cartões somam só estas.">@comCotaErp com meta no ERP</span>
+                    <span class="small text-muted dica" title="Estruturas com cota no mês no ERP (Cotas de Vendas). Como no relatório Metas do ERP, aparece quem tem meta ou vendeu no mês; quem não tem nenhum dos dois fica fora da lista.">@comCotaErp com meta no ERP</span>
                 }
                 @if (acesso.Altera)
                 {
@@ -139,7 +142,7 @@ else
             </div>
             <div class="small text-muted mt-2">
                 Metas = cotas cadastradas no ERP (Cotas de Vendas); sem cota no ERP, vale a meta digitada aqui. Meta do dia = meta do mês ÷ dias úteis do mês;
-                meta acumulada = meta do mês × dias úteis até a data ÷ dias úteis do mês. Sem vendas em permuta, como o relatório "Metas" do ERP.
+                meta acumulada = meta do mês × dias úteis até a data ÷ dias úteis do mês. Com "Desconsiderar permutas" ligado, tira as vendas em permuta (local de pagamento PERMUTA), como o relatório "Metas" do ERP.
                 Vendedor = estrutura de venda do documento (gerente = estrutura "pai"). Dados direto das tabelas do ERP, sem views.
             </div>
         </div>
@@ -189,7 +192,10 @@ else
     private List<MetaVendedor> metasMesAnterior = [];
     private bool porGerente, mostrarSql, ocupado, alterado;
 
-    /// <summary>Estruturas com cota (&gt; 0) no ERP no mês. Havendo cotas, só elas aparecem (as demais não fazem parte das vendas).</summary>
+    /// <summary>Desconsiderar vendas em permuta (ligado por padrão, como o relatório Metas do ERP).</summary>
+    private bool semPermuta = true;
+
+    /// <summary>Estruturas com cota (&gt; 0) no ERP no mês (só informativo; aparece quem tem meta ou vendeu no mês).</summary>
     private int comCotaErp;
 
     /// <summary>Estruturas zeradas (sem venda nem meta) não aparecem.</summary>
@@ -241,7 +247,7 @@ else
         await using var db = await Fabrica.CreateDbContextAsync();
         var inicioAnt = Mes.AddYears(-1);
         var vendas = await db.VendasVendedores.AsNoTracking()
-            .Where(v => v.ClienteId == empresa.Id && v.Data >= inicioAnt && v.Data <= dataFinal).ToListAsync();
+            .Where(v => v.ClienteId == empresa.Id && v.Data >= inicioAnt && v.Data <= dataFinal && !(semPermuta && v.Permuta)).ToListAsync();
         var metas = await db.MetasVendedores.AsNoTracking().Where(m => m.ClienteId == empresa.Id && m.Competencia == Mes).ToListAsync();
         metasMesAnterior = await db.MetasVendedores.AsNoTracking().Where(m => m.ClienteId == empresa.Id && m.Competencia == Mes.AddMonths(-1)).ToListAsync();
         var feriados = (await db.Feriados.AsNoTracking().Where(f => f.ClienteId == empresa.Id).Select(f => f.Data).ToListAsync()).ToHashSet();
@@ -249,7 +255,7 @@ else
 
         var comCota = metas.Where(m => m.DoErp && m.Meta > 0).Select(m => m.Vendedor).ToHashSet();
         comCotaErp = comCota.Count;
-        relatorio = ComercialResumo.Montar(dataFinal, vendas, metas, feriados, ajuste, comCota.Count > 0 ? comCota : null);
+        relatorio = ComercialResumo.Montar(dataFinal, vendas, metas, feriados, ajuste);
         metasDoErp = metas.Where(m => m.DoErp).Select(m => m.Vendedor).ToHashSet();
         metasEditadas = relatorio.Vendedores.Where(v => !metasDoErp.Contains(v.Vendedor)).ToDictionary(v => v.Vendedor, v => v.MetaMes);
         diasUteisEditado = ajuste;

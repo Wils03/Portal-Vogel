@@ -84,9 +84,18 @@ BEGIN
         [Documentos]   int           NOT NULL,  -- número de vendas (documentos)
         [Itens]        int           NOT NULL,  -- itens vendidos (linhas)
         [AtualizadoEm] datetime      NOT NULL,
-        CONSTRAINT [PK_LV_Comercial] PRIMARY KEY ([Data], [Vendedor])
+        [Permuta]      bit           NOT NULL CONSTRAINT [DF_LV_Comercial_Permuta] DEFAULT 0, -- local de pagamento PERMUTA
+        CONSTRAINT [PK_LV_Comercial] PRIMARY KEY ([Data], [Vendedor], [Permuta])
     );
     PRINT 'Criada: LV_Comercial';
+END
+ELSE IF COL_LENGTH(N'dbo.LV_Comercial', N'Permuta') IS NULL
+BEGIN
+    -- BASELV criada antes da coluna Permuta: acrescenta a coluna e refaz a chave (os dados ficam; a próxima sincronização completa)
+    ALTER TABLE dbo.[LV_Comercial] ADD [Permuta] bit NOT NULL CONSTRAINT [DF_LV_Comercial_Permuta] DEFAULT 0;
+    ALTER TABLE dbo.[LV_Comercial] DROP CONSTRAINT [PK_LV_Comercial];
+    EXEC (N'ALTER TABLE dbo.[LV_Comercial] ADD CONSTRAINT [PK_LV_Comercial] PRIMARY KEY ([Data], [Vendedor], [Permuta])');
+    PRINT 'Atualizada: LV_Comercial (coluna Permuta)';
 END
 
 -- Metas (cotas) de venda por vendedor e mês, da tabela Cotas de Vendas do ERP.

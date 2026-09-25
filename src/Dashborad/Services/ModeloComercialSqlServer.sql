@@ -4,7 +4,8 @@
 --   tipos Cupom Fiscal / Nota Fiscal / Nota Fiscal Fatura / Conhecimento de Frete; sem condições "Não considera faturamento";
 --   valor = (preço com IPI + ST + frete + despesas acessórias do item) com o desconto do documento rateado;
 --   devolução = CFOP "Devolução de Venda" (sinal -1).
--- Como o relatório "Metas" do ERP: NÃO considera vendas com local de pagamento PERMUTA (no ERP, local 25).
+-- Vendas com local de pagamento PERMUTA (no ERP, local 25) vêm em linhas separadas (Permuta = 1): o portal tem um
+-- interruptor para desconsiderá-las, como o relatório "Metas" do ERP.
 -- Vendedor = estrutura de venda do DOCUMENTO (assim o número de vendas da empresa é a soma dos vendedores).
 -- Gerente = estrutura "pai" do vendedor. CMV: quantidade × "Custo total" do item (o "Custo Total" do relatório de metas do ERP).
 -- {inicio} e {fim} são trocados pelo período (ano).
@@ -17,7 +18,8 @@ SELECT CAST(v.Data AS date) AS Data,
        SUM(CASE WHEN v.Sinal = -1 THEN v.Receita ELSE 0 END) AS Devolucoes,
        SUM(v.Sinal * v.Custo) AS Cmv,
        COUNT(DISTINCT CASE WHEN v.Sinal = 1 THEN v.Documento END) AS Documentos,
-       SUM(CASE WHEN v.Sinal = 1 THEN 1 ELSE 0 END) AS Itens
+       SUM(CASE WHEN v.Sinal = 1 THEN 1 ELSE 0 END) AS Itens,
+       v.Permuta
 FROM (
     SELECT ISNULL(DF.[Data competencia], DF.[Data de Emissao]) AS Data,
            ISNULL(NULLIF(DF.[Codigo da Estrutura], ''), '(sem vendedor)') AS Vendedor,
@@ -27,7 +29,8 @@ FROM (
             + CASE WHEN DF.[Valor Frete] > 0 THEN I.[Valor Frete] ELSE 0 END
             + CASE WHEN DF.[Valor despesas acessorias] > 0 THEN I.[Valor despesas acessorias] ELSE 0 END)
            * DF.[Valor Total] / (DF.[Valor Total] + DF.[Valor do desconto]) AS Receita,
-           I.Quantidade * ISNULL(I.[Custo total], 0) AS Custo
+           I.Quantidade * ISNULL(I.[Custo total], 0) AS Custo,
+           CASE WHEN ISNULL(LP.[Descricao do Local], '') LIKE 'PERMUTA%' THEN 1 ELSE 0 END AS Permuta
     FROM [Itens dos Documentos Fisc] I WITH (NOLOCK)
     INNER JOIN [Documentos Fiscais] DF WITH (NOLOCK)
             ON DF.Filial = I.Filial AND DF.[Codigo do tipo de documen] = I.[Codigo do tipo de documen] AND DF.[Numero do documento] = I.[Numero do documento]
@@ -40,7 +43,6 @@ FROM (
     LEFT JOIN [Locais de Pagamento] LP WITH (NOLOCK)
             ON LP.[Codigo do Local] = DF.[Codigo do Local]
     WHERE CF.[Nao considera faturamento] = 0
-      AND ISNULL(LP.[Descricao do Local], '') NOT LIKE 'PERMUTA%'
       AND DF.[Valor Total] > 0
       AND DF.[Valor Total] - DF.[Valor despesas acessorias] > 0
       AND DF.[Valor Total] - DF.[Valor Frete] > 0
@@ -51,4 +53,4 @@ FROM (
 ) v
 LEFT JOIN [Estrutura de Vendas] ev WITH (NOLOCK) ON ev.[Codigo da Estrutura] = v.Vendedor
 LEFT JOIN [Estrutura de Vendas] eg WITH (NOLOCK) ON eg.[Codigo da Estrutura] = ev.[Codigo da estrutura pai]
-GROUP BY CAST(v.Data AS date), v.Vendedor
+GROUP BY CAST(v.Data AS date), v.Vendedor, v.Permuta
