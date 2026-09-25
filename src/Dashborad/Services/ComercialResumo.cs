@@ -70,8 +70,11 @@ public sealed record LinhaMetas(
     /// <summary>Acumulado − meta proporcional aos dias úteis até a data (está adiantado ou atrasado no ritmo da meta).</summary>
     public decimal? DiferencaAcumulada => MetaAcumulada is decimal m ? Acumulado.Venda - m : null;
 
-    /// <summary>Sem venda, CMV ou vendas no dia, no mês e no ano anterior, e sem meta (ou cota zero no ERP).</summary>
-    public bool Zerada => (MetaMes ?? 0) == 0 && Vazio(Dia) && Vazio(Acumulado) && Vazio(AnoAnterior);
+    /// <summary>
+    /// Sem meta e sem movimento no mês (dia e acumulado): não aparece na tabela, como no relatório "Metas" do ERP.
+    /// O ano anterior não conta para aparecer, mas entra nos totais (o ERP soma todos).
+    /// </summary>
+    public bool Zerada => (MetaMes ?? 0) == 0 && Vazio(Dia) && Vazio(Acumulado);
 
     private static bool Vazio(Bloco b) => b is { Venda: 0, Cmv: 0, Documentos: 0 };
 }

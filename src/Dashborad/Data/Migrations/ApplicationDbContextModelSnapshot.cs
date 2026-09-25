@@ -850,6 +850,9 @@ namespace Portal.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<bool>("Permuta")
+                        .HasColumnType("bit");
+
                     b.Property<decimal>("VendaBruta")
                         .HasPrecision(18, 6)
                         .HasColumnType("decimal(18,6)");

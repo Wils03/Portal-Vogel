@@ -99,7 +99,8 @@ public static class ImportacaoDados
                 Devolucoes = D(r, "devolucoes"),
                 Cmv = D(r, "cmv"),
                 Documentos = I(r, "documentos"),
-                Itens = I(r, "itens")
+                Itens = I(r, "itens"),
+                Permuta = V(r, "permuta") is { } p && Convert.ToInt32(p, CultureInfo.InvariantCulture) != 0
             });
         }
         return lista;

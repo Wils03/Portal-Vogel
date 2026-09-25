@@ -135,6 +135,16 @@ public sealed partial class Sincronizador(string origem, string destino, Opcoes 
     // ---------------------------------------------------------------- Comercial (vendedores)
 
     /// <summary>Vendas por dia e vendedor, ano atual e anteriores (DreAnos), um ano por vez; e os feriados do ERP.</summary>
+    private async Task<bool> ColunaExisteAsync(string tabela, string coluna, CancellationToken ct)
+    {
+        await using var cn = new SqlConnection(destino);
+        await cn.OpenAsync(ct);
+        await using var cmd = new SqlCommand("SELECT COL_LENGTH(@t, @c)", cn);
+        cmd.Parameters.AddWithValue("@t", "dbo." + tabela);
+        cmd.Parameters.AddWithValue("@c", coluna);
+        return await cmd.ExecuteScalarAsync(ct) is not (null or DBNull);
+    }
+
     private async Task<int> SincronizarComercialAsync(int? anoForcado, CancellationToken ct)
     {
         var anos = anoForcado is int a ? [a] : Enumerable.Range(0, opcoes.DreAnos).Select(i => DateTime.Today.Year - i).ToArray();
@@ -147,6 +157,7 @@ public sealed partial class Sincronizador(string origem, string destino, Opcoes 
             var origemDados = await LerDaBaseAsync(sql, ["Data", "Vendedor", "VendaBruta", "Devolucoes", "Cmv", "Documentos", "Itens"], ct);
 
             var agora = DateTime.Now;
+            var comPermuta = await ColunaExisteAsync("LV_Comercial", "Permuta", ct);
             var tabela = new DataTable();
             tabela.Columns.Add("Data", typeof(DateTime));
             foreach (var c in new[] { "Vendedor", "NomeVendedor", "Gerente", "NomeGerente" }) tabela.Columns.Add(c, typeof(string));
@@ -154,17 +165,22 @@ public sealed partial class Sincronizador(string origem, string destino, Opcoes 
             tabela.Columns.Add("Documentos", typeof(int));
             tabela.Columns.Add("Itens", typeof(int));
             tabela.Columns.Add("AtualizadoEm", typeof(DateTime));
+            if (comPermuta) tabela.Columns.Add("Permuta", typeof(bool));
+            var temColunaPermuta = origemDados.Columns.Contains("Permuta");
             foreach (DataRow r in origemDados.Rows)
             {
                 if (r["Data"] is DBNull) continue;
+                var permuta = temColunaPermuta && r["Permuta"] is not DBNull && Convert.ToInt32(r["Permuta"], CultureInfo.InvariantCulture) != 0;
+                if (permuta && !comPermuta) continue; // BASELV ainda sem a coluna Permuta: fica só a venda sem permuta
                 var dia = Convert.ToDateTime(r["Data"], CultureInfo.InvariantCulture).Date;
                 tabela.Rows.Add(dia, Truncar(Convert.ToString(r["Vendedor"])?.Trim() ?? "", 20),
                     Texto(r, "NomeVendedor", 100), Texto(r, "Gerente", 20), Texto(r, "NomeGerente", 100),
                     Numero(r, "VendaBruta") is decimal vb ? vb : 0m, Numero(r, "Devolucoes") is decimal dv ? dv : 0m, Numero(r, "Cmv") is decimal cm ? cm : 0m,
                     Convert.ToInt32(r["Documentos"], CultureInfo.InvariantCulture), Convert.ToInt32(r["Itens"], CultureInfo.InvariantCulture), agora);
+                if (comPermuta) tabela.Rows[^1]["Permuta"] = permuta;
             }
             await TrocarAsync("LV_Comercial", "[Data] >= @a AND [Data] < @b", [new("@a", inicio), new("@b", fim)], tabela, ct);
-            log($"  Comercial {ano}: {tabela.Rows.Count:N0} linha(s) (dia × vendedor)");
+            log($"  Comercial {ano}: {tabela.Rows.Count:N0} linha(s) (dia × vendedor){(comPermuta ? "" : "; sem permuta (BASELV sem a coluna Permuta: rode o 01-criar-baselv.sql)")}");
             total += tabela.Rows.Count;
 
             if (opcoes.SqlCotas is not null)
