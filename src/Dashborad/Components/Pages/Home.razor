@@ -1,0 +1,491 @@
+@page "/"
+@attribute [Authorize]
+@implements IDisposable
+@inject ClienteAtualService ClienteAtual
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject AcessoService Acessos
+@inject PedidoSincronizacao Pedidos
+@inject ImportacaoBaseLv Importacao
+
+<PageTitle>Painel · Vogel</PageTitle>
+
+<div class="cabecalho-pagina">
+    <h1>Painel@(acesso.EhCliente ? $" · {acesso.ClienteNome}" : ClienteAtual.Nome is string foco ? $" · {foco}" : "")</h1>
+    <span class="text-muted small">Atualizado em @DateTime.Now.ToString("dd/MM/yyyy HH:mm")</span>
+</div>
+
+@if (EmpresaFoco is not null && empresa is not null)
+{
+    <div class="dados-atualizados mb-2">
+        <span class="dica" title="Os dados vêm do sistema do cliente pela sincronização diária. Mais de 36 horas sem atualizar aparece como desatualizado.">Dados:</span>
+        @if (acesso.VeDre) { @Dados("DRE", "dre", DataDosDados.Referencia(empresa.DreDadosDe, empresa.DreAtualizadoEm)) }
+        @Dados("Precificação", "precificacao", DataDosDados.Referencia(empresa.PrecificacaoDadosDe, empresa.PrecificacaoAtualizadoEm))
+        @if (acesso.AtualizaDoBanco && PedidoSincronizacao.Disponivel(empresa))
+        {
+            <button class="btn btn-sm btn-outline-primary ms-3 py-0" @onclick="SincronizarAgora" disabled="@(pedindo || pedido?.EmAndamento == true)"
+                    title="Pede ao servidor do cliente para sincronizar agora (DRE, Precificação e rotinas). Ele confere os pedidos a cada 5 minutos.">
+                @if (pedindo || pedido?.EmAndamento == true) { <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> }
+                else { <i class="bi bi-arrow-repeat"></i> }
+                <span>Sincronizar agora</span>
+            </button>
+            @if (pedidoMensagem is not null || pedido is not null)
+            {
+                <div class="small mt-1 @(pedido?.Status == PedidoSincronizacao.Erro || pedidoFalhou ? "negativo" : "")" role="status">
+                    @(pedidoMensagem ?? PedidoSincronizacao.Descrever(pedido!, DateTime.Now))
+                </div>
+            }
+        }
+    </div>
+
+    <div class="row g-3 mb-3">
+        @if (acesso.VeDre && vendas is not null)
+        {
+            var v = vendas;
+            <div class="col-md-6 col-xl-3">
+                <div class="cartao kpi">
+                    <div class="rotulo"><span class="dica" title="Receita bruta menos devoluções: é a &quot;Venda&quot; da tela de indicadores do ERP.">Venda líquida · @NomeMes(v.Mes)</span>@(v.Parcial ? $" (até dia {v.DiasComDados})" : "")</div>
+                    <div class="valor">@v.VendaLiquida.ToString("C0")</div>
+                    @if (v.Parcial)
+                    {
+                        <div class="detalhe">
+                            @if (v.ProjecaoVenda is decimal proj)
+                            {
+                                <span class="dica" title="Venda até agora ÷ @v.DiasComDados dia(s) × @v.DiasNoMes dias do mês. Projeção simples, em dias corridos.">Projeção do mês: <strong>@proj.ToString("C0")</strong></span>
+                            }
+                            else { <span>Mês começando: projeção a partir do dia @PainelResumo.DiasMinimosProjecao.</span> }
+                        </div>
+                    }
+                    <div class="comparacoes">
+                        @Comparacao(v.VariacaoMesAnterior, v.VendaMesAnterior, v.Mes.AddMonths(-1), v.Parcial)
+                        @Comparacao(v.VariacaoAnoAnterior, v.VendaMesmoMesAnoAnterior, v.Mes.AddYears(-1), v.Parcial)
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-xl-3">
+                <div class="cartao kpi">
+                    <div class="rotulo"><span class="dica" title="Faturamento bruto mínimo por mês para pagar as despesas fixas (DRE dos 12 meses anteriores). A barra mostra quanto do mês já foi faturado.">Ponto de equilíbrio · @NomeMes(v.Mes)</span></div>
+                    @if (v.Pe is { } pe && v.ProgressoPe is decimal prog)
+                    {
+                        <div class="valor @(prog >= 1 ? "positivo" : "")">@prog.ToString("P0")</div>
+                        <div class="progress my-1" role="progressbar" aria-valuenow="@((int)Math.Min(prog * 100, 100))" aria-valuemin="0" aria-valuemax="100" style="height: .6rem">
+                            <div class="progress-bar @(prog >= 1 ? "bg-success" : "")" style="width: @(Math.Min(prog * 100, 100).ToString("0", System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                        </div>
+                        <div class="detalhe">Faturado @v.ReceitaBruta.ToString("C0") de @pe.PontoEquilibrio.ToString("C0")/mês</div>
+                        <div class="detalhe">
+                            @if (prog >= 1) { <span class="positivo">Atingido: @((v.ReceitaBruta - pe.PontoEquilibrio).ToString("C0")) acima do equilíbrio</span> }
+                            else { <span>Faltam <strong>@((pe.PontoEquilibrio - v.ReceitaBruta).ToString("C0"))</strong> para cobrir os custos fixos</span> }
+                        </div>
+                        @if (v.Parcial && v.ProjecaoReceitaBruta is decimal projRb)
+                        {
+                            <div class="detalhe">No ritmo atual o mês fecha em @projRb.ToString("C0") (<span class="@(projRb >= pe.PontoEquilibrio ? "positivo" : "negativo")">@(projRb >= pe.PontoEquilibrio ? "acima" : "abaixo") do equilíbrio</span>)</div>
+                        }
+                    }
+                    else
+                    {
+                        <div class="detalhe mt-2">Sem meses suficientes na DRE para calcular. <a href="dre">Abrir DRE</a></div>
+                    }
+                </div>
+            </div>
+            <div class="col-md-6 col-xl-3">
+                <div class="cartao kpi">
+                    <div class="rotulo"><span class="dica" title="Lucro bruto ÷ receita bruta: o que sobra da venda depois de impostos, devoluções e custo das mercadorias.">Margem bruta · @NomeMes(v.Mes)</span></div>
+                    <div class="valor">@(v.MargemBrutaPct?.ToString("P1") ?? "—")</div>
+                    @if (v.MesFechado is DateOnly fechado && v.ResultadoMesFechado is decimal resultado)
+                    {
+                        <div class="detalhe mt-1">
+                            <span class="dica" title="Lucro líquido do último mês completo. O mês em andamento ainda não tem todas as despesas lançadas.">Resultado de @NomeMes(fechado)</span>:
+                            <strong class="@(resultado < 0 ? "negativo" : "positivo")">@resultado.ToString("C0")</strong>
+                            @if (v.MargemLiquidaMesFechado is decimal ml) { <span>(@ml.ToString("P1") da receita)</span> }
+                        </div>
+                    }
+                    <div class="detalhe"><a href="dre">Ver a DRE</a></div>
+                </div>
+            </div>
+        }
+        @if (precos is not null)
+        {
+            var p = precos;
+            <div class="col-md-6 col-xl-3">
+                <div class="cartao kpi">
+                    <div class="rotulo"><span class="dica" title="Produtos que venderam nos últimos 90 dias e estão com margem de contribuição negativa, preço mais de 2% abaixo da regra do ERP ou custo zerado (o mesmo filtro &quot;Só problemas&quot; da Precificação).">Preços que precisam de atenção</span></div>
+                    <div class="valor @(p.ComProblema > 0 ? "negativo" : "positivo")">@p.ComProblema.ToString("N0")</div>
+                    <div class="detalhe">de @p.ComVenda.ToString("N0") produtos com venda</div>
+                    @if (p.ComProblema > 0)
+                    {
+                        <div class="detalhe mt-1">
+                            @if (p.AbaixoRegra > 0) { <div>@p.AbaixoRegra.ToString("N0") abaixo da regra do ERP</div> }
+                            @if (p.MargemNegativa > 0) { <div>@p.MargemNegativa.ToString("N0") com margem negativa</div> }
+                            @if (p.SemCusto > 0) { <div>@p.SemCusto.ToString("N0") sem custo</div> }
+                            <div><span class="dica" title="Preço atual × quantidade média vendida por mês desses produtos.">Venda desses produtos:</span> @p.VendaMesEmRisco.ToString("C0")/mês</div>
+                        </div>
+                        <div class="detalhe mt-1"><a href="precificacao?problemas=1">Revisar na Precificação</a></div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+else if (acesso.EhVogel && empresas.Count > 0)
+{
+    <div class="cartao mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h2 class="h5 m-0">Empresas</h2>
+            <span class="small text-muted">Clique no nome para abrir o Painel da empresa</span>
+        </div>
+        <div class="table-wrap">
+            <table class="table table-sm align-middle m-0">
+                <thead>
+                    <tr>
+                        <th>Empresa</th>
+                        <th class="num"><span class="dica" title="Venda líquida do último mês com dados; entre parênteses, até que dia (mês em andamento).">Venda do mês</span></th>
+                        <th class="num"><span class="dica" title="Contra o mês anterior. Com o mês em andamento, usa a projeção do mês.">vs mês ant.</span></th>
+                        <th class="num"><span class="dica" title="Faturamento bruto do mês ÷ ponto de equilíbrio.">Equilíbrio</span></th>
+                        <th class="num"><span class="dica" title="Produtos com venda que precisam de atenção (Só problemas da Precificação).">Preços</span></th>
+                        <th class="num">Alertas</th>
+                        <th>Dados</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in empresas)
+                    {
+                        var dados = e.DadosDre ?? e.DadosPrecificacao;
+                        <tr>
+                            <td><a href="" @onclick="() => AbrirEmpresa(e.Id)" @onclick:preventDefault>@e.Nome</a></td>
+                            <td class="num text-nowrap">
+                                @if (e.Vendas is { } ev) { @ev.VendaLiquida.ToString("C0") @if (ev.Parcial) { <span class="small text-muted"> (até @ev.DiasComDados)</span> } }
+                                else { <span class="text-muted">—</span> }
+                            </td>
+                            <td class="num">
+                                @if (e.Vendas?.VariacaoMesAnterior is decimal variacao) { <span class="@(variacao >= 0 ? "positivo" : "negativo")">@(variacao >= 0 ? "▲" : "▼") @variacao.ToString("+0.0%;-0.0%")</span> }
+                                else { <span class="text-muted">—</span> }
+                            </td>
+                            <td class="num">
+                                @if (e.Vendas?.ProgressoPe is decimal pr) { <span class="@(pr >= 1 ? "positivo" : "")">@pr.ToString("P0")</span> }
+                                else { <span class="text-muted">—</span> }
+                            </td>
+                            <td class="num">@(e.Precos is { } ep ? ep.ComProblema.ToString("N0") : "—")</td>
+                            <td class="num">@(e.Alertas > 0 ? e.Alertas.ToString() : "—")</td>
+                            <td class="text-nowrap">
+                                @(dados?.ToString("dd/MM HH:mm") ?? "nunca")
+                                @if (DataDosDados.Desatualizado(dados, DateTime.Now)) { <span class="selo selo-Atencao ms-1">desatualizado</span> }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+<div class="row g-3 mb-3">
+    <div class="col-6 col-lg-3">
+        <div class="cartao kpi">
+            <div class="rotulo">Alertas em aberto</div>
+            <div class="valor">@abertos</div>
+            <div class="detalhe">@criticos críticos</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-3">
+        <div class="cartao kpi">
+            <div class="rotulo">Falhas de conexão/consulta</div>
+            <div class="valor @(erros > 0 ? "negativo" : "")">@erros</div>
+            <div class="detalhe">nos últimos 7 dias</div>
+        </div>
+    </div>
+    @if (acesso.EhVogel && ClienteAtual.ClienteId == 0)
+    {
+    <div class="col-6 col-lg-3">
+        <div class="cartao kpi">
+            <div class="rotulo">Clientes ativos</div>
+            <div class="valor">@clientesAtivos</div>
+            <div class="detalhe">@semConexao sem conexão configurada</div>
+        </div>
+    </div>
+    }
+    <div class="col-6 col-lg-3">
+        <div class="cartao kpi">
+            <div class="rotulo">Mensagens enviadas</div>
+            <div class="valor">@mensagens7d</div>
+            <div class="detalhe">nos últimos 7 dias</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-7">
+        <div class="cartao">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h2 class="h5 m-0">@(acesso.EhVogel && ClienteAtual.ClienteId == 0 ? "Clientes com mais pendências" : "Pendências em aberto")</h2>
+                <a href="alertas" class="small">Ver alertas</a>
+            </div>
+            @if (ranking.Count == 0)
+            {
+                <p class="text-muted m-0">Nenhum alerta em aberto. 👍</p>
+            }
+            else
+            {
+                <table class="table table-sm align-middle m-0">
+                    <thead><tr><th>Cliente</th><th class="num">Alertas</th><th class="num">Ocorrências</th><th>Pior severidade</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in ranking)
+                        {
+                            <tr>
+                                <td>@r.Cliente</td>
+                                <td class="num">@r.Alertas</td>
+                                <td class="num">@r.Ocorrencias.ToString("N0")</td>
+                                <td><span class="selo selo-@r.Severidade">@Rotulos.Texto(r.Severidade)</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="cartao">
+            <h2 class="h5">Rotinas</h2>
+            <table class="table table-sm align-middle m-0">
+                <thead><tr><th>Rotina</th><th>Horário</th><th>Última execução</th></tr></thead>
+                <tbody>
+                    @foreach (var r in rotinas)
+                    {
+                        var ef = Efetiva(r);
+                        <tr class="@(ef.Ativa ? "" : "text-muted")">
+                            <td>@r.Nome @if (!ef.Ativa) { <span class="small">(desligada)</span> }</td>
+                            <td>@(ef.Hora is int h ? $"{h:00}:00" : "manual")</td>
+                            <td>@(UltimaExecucao(r)?.ToString("dd/MM HH:mm") ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="cartao vobo">
+            <img src="img/vobo.jpg" alt="Vobô" />
+            <div>
+                <strong>Vobô, o robô da Vogel</strong>
+                <div class="small text-muted">Roda as rotinas todos os dias e prepara as mensagens de WhatsApp para os clientes com pendências.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private int abertos, criticos, erros, clientesAtivos, semConexao, mensagens7d;
+    private List<Rotina> rotinas = [];
+    private Acesso acesso = Acesso.Nenhum;
+    private Dictionary<int, RotinaCliente> programacao = [];
+
+    // Empresa em foco: a do usuário do cliente, ou a escolhida no topo pela Vogel (nulo = todas)
+    private int? EmpresaFoco => acesso.EhCliente ? acesso.ClienteId : ClienteAtual.Filtro;
+
+    // Com uma empresa em foco, mostra a rotina como vale para ela
+    private ConfigRotina Efetiva(Rotina r) => EmpresaFoco is not null
+        ? ConfigRotina.Efetiva(r, programacao.GetValueOrDefault(r.Id))
+        : new ConfigRotina(r.Ativa, r.HoraExecucao, r.EnviarAutomaticamente);
+
+    private DateTime? UltimaExecucao(Rotina r) => EmpresaFoco is not null ? programacao.GetValueOrDefault(r.Id)?.UltimaExecucao : r.UltimaExecucao;
+    private List<(string Cliente, int Alertas, decimal Ocorrencias, Severidade Severidade)> ranking = [];
+
+    // Resumo da empresa em foco
+    private Cliente? empresa;
+    private ResumoVendas? vendas;
+    private ResumoPrecos? precos;
+
+    // "Sincronizar agora"
+    private SituacaoPedido? pedido;
+    private string? pedidoMensagem;
+    private bool pedindo, pedidoFalhou;
+    private CancellationTokenSource? acompanhamento;
+
+    // Visão "Todas as empresas" (Vogel)
+    private sealed record LinhaEmpresa(int Id, string Nome, ResumoVendas? Vendas, ResumoPrecos? Precos, int Alertas, DateTime? DadosDre, DateTime? DadosPrecificacao);
+    private List<LinhaEmpresa> empresas = [];
+
+    private static string NomeMes(DateOnly m) => new DateTime(m.Year, m.Month, 1).ToString("MMM/yy");
+
+    private RenderFragment Comparacao(decimal? variacao, decimal? anterior, DateOnly mes, bool parcial) => __builder =>
+    {
+        if (variacao is decimal pct)
+        {
+            <div class="detalhe"><span class="@(pct >= 0 ? "positivo" : "negativo")">@(pct >= 0 ? "▲" : "▼") @pct.ToString("+0.0%;-0.0%")</span>
+                vs @NomeMes(mes) (@anterior!.Value.ToString("C0"))@(parcial ? ", pela projeção" : "")</div>
+        }
+        else if (anterior is null)
+        {
+            <div class="detalhe">Sem venda em @NomeMes(mes) para comparar</div>
+        }
+    };
+
+    private RenderFragment Dados(string nome, string link, DateTime? quando) => __builder =>
+    {
+        <span class="ms-2 text-nowrap">
+            <a href="@link">@nome</a> @(quando?.ToString("dd/MM HH:mm") ?? "nunca atualizado")
+            @if (DataDosDados.Desatualizado(quando, DateTime.Now)) { <span class="selo selo-Atencao ms-1">desatualizado</span> }
+        </span>
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        acesso = await Acessos.ObterAsync();
+        ClienteAtual.Mudou += AoMudarCliente;
+        await Carregar();
+    }
+
+    private Task AoMudarCliente() => InvokeAsync(async () => { await Carregar(); StateHasChanged(); });
+
+    public void Dispose()
+    {
+        ClienteAtual.Mudou -= AoMudarCliente;
+        acompanhamento?.Cancel();
+    }
+
+    /// <summary>Registra o pedido na BASELV do cliente e passa a acompanhar até o servidor dele terminar.</summary>
+    private async Task SincronizarAgora()
+    {
+        if (empresa is null || !acesso.AtualizaDoBanco) return;
+        pedindo = true;
+        pedidoFalhou = false;
+        try
+        {
+            var r = await Pedidos.PedirAsync(empresa, acesso.Email, DateTime.Now);
+            pedido = r.Situacao;
+            pedidoMensagem = r.Mensagem;
+            if (pedido?.EmAndamento == true) Acompanhar(empresa);
+        }
+        catch (Exception ex)
+        {
+            pedidoFalhou = true;
+            pedidoMensagem = $"Não foi possível enviar o pedido ao servidor do cliente: {ex.Message}";
+        }
+        finally { pedindo = false; }
+    }
+
+    /// <summary>
+    /// Em segundo plano (o Painel não espera): lê o último pedido e, enquanto estiver em andamento, confere a cada 15 s.
+    /// Quando o servidor do cliente conclui, importa os dados novos da BASELV e recarrega o Painel.
+    /// </summary>
+    private void Acompanhar(Cliente alvo)
+    {
+        acompanhamento?.Cancel();
+        var cts = acompanhamento = new CancellationTokenSource(TimeSpan.FromMinutes(45));
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var primeira = true;
+                while (!cts.IsCancellationRequested)
+                {
+                    if (!primeira) await Task.Delay(TimeSpan.FromSeconds(15), cts.Token);
+                    var situacao = await Pedidos.UltimoAsync(alvo, cts.Token);
+                    var concluiuAgora = !primeira && pedido?.EmAndamento == true && situacao is { EmAndamento: false };
+                    primeira = false;
+                    await InvokeAsync(() =>
+                    {
+                        if (empresa?.Id != alvo.Id) return;
+                        pedido = situacao;
+                        pedidoMensagem = null;
+                        StateHasChanged();
+                    });
+                    if (concluiuAgora && situacao!.Status == PedidoSincronizacao.Concluido)
+                    {
+                        await Importacao.ImportarAsync(alvo, DateTime.Now, forcar: false, cts.Token);
+                        await InvokeAsync(async () => { if (empresa?.Id == alvo.Id) { await Carregar(); StateHasChanged(); } });
+                    }
+                    if (situacao is not { EmAndamento: true }) break;
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception)
+            {
+                // Sem conexão com o servidor do cliente: o Painel segue com os dados atuais (a data mostra se estão velhos)
+            }
+        });
+    }
+
+    private Task AbrirEmpresa(int id) => ClienteAtual.DefinirAsync(id);
+
+    private IQueryable<Alerta> Alertas(ApplicationDbContext db) =>
+        EmpresaFoco is int id ? acesso.Filtrar(db.Alertas).Where(a => a.ClienteId == id) : acesso.Filtrar(db.Alertas);
+
+    private async Task Carregar()
+    {
+        await using var db = await Fabrica.CreateDbContextAsync();
+        var semana = DateTime.Now.AddDays(-7);
+        programacao = [];
+
+        var emAberto = await Alertas(db).Include(a => a.Cliente)
+            .Where(a => a.Status == StatusAlerta.Novo || a.Status == StatusAlerta.Notificado)
+            .ToListAsync();
+        abertos = emAberto.Count;
+        criticos = emAberto.Count(a => a.Severidade == Severidade.Critico);
+        ranking = emAberto.GroupBy(a => a.Cliente!.Nome)
+            .Select(g => (g.Key, g.Count(), g.Sum(a => a.Quantidade), g.Max(a => a.Severidade)))
+            .OrderByDescending(r => r.Item4).ThenByDescending(r => r.Item2).Take(10).ToList();
+
+        erros = await Alertas(db).CountAsync(a => a.Status == StatusAlerta.Erro && a.DataHora >= semana);
+        clientesAtivos = await acesso.Filtrar(db.Clientes).CountAsync(c => c.Ativo);
+        semConexao = await acesso.Filtrar(db.Clientes).CountAsync(c => c.Ativo && c.ConexaoCriptografada == null);
+        mensagens7d = await acesso.Filtrar(db.Mensagens).Where(m => EmpresaFoco == null || m.ClienteId == EmpresaFoco).CountAsync(m => m.DataHora >= semana && m.Sucesso);
+        rotinas = await db.Rotinas.AsNoTracking().OrderBy(r => r.HoraExecucao).ToListAsync();
+        if (EmpresaFoco is int foco)
+        {
+            // Só as liberadas pela Vogel e compatíveis com o banco da empresa
+            var tipo = await db.Clientes.Where(c => c.Id == foco).Select(c => c.TipoBanco).FirstAsync();
+            rotinas = rotinas.Where(r => r.Ativa && (r.TipoBanco == null || r.TipoBanco == tipo)).ToList();
+            programacao = await db.RotinasClientes.AsNoTracking().Where(p => p.ClienteId == foco).ToDictionaryAsync(p => p.RotinaId);
+        }
+
+        empresa = null;
+        vendas = null;
+        precos = null;
+        empresas = [];
+        if (EmpresaFoco is int id)
+        {
+            var anterior = empresa?.Id;
+            empresa = await acesso.Filtrar(db.Clientes).AsNoTracking().FirstOrDefaultAsync(c => c.Id == id);
+            if (empresa is not null) (vendas, precos) = await ResumirAsync(db, empresa);
+            if (empresa is not null && anterior != empresa.Id)
+            {
+                pedido = null;
+                pedidoMensagem = null;
+                acompanhamento?.Cancel();
+                if (acesso.AtualizaDoBanco && PedidoSincronizacao.Disponivel(empresa)) Acompanhar(empresa);
+            }
+        }
+        else if (acesso.EhVogel)
+        {
+            // Uma linha por empresa ativa: quem precisa de atenção hoje
+            var alertasPorEmpresa = emAberto.GroupBy(a => a.ClienteId).ToDictionary(g => g.Key, g => g.Count());
+            var ativas = await acesso.Filtrar(db.Clientes).AsNoTracking().Where(c => c.Ativo).OrderBy(c => c.Nome).ToListAsync();
+            foreach (var c in ativas)
+            {
+                var (v, p) = await ResumirAsync(db, c);
+                empresas.Add(new LinhaEmpresa(c.Id, c.Nome, v, p, alertasPorEmpresa.GetValueOrDefault(c.Id),
+                    DataDosDados.Referencia(c.DreDadosDe, c.DreAtualizadoEm), DataDosDados.Referencia(c.PrecificacaoDadosDe, c.PrecificacaoAtualizadoEm)));
+            }
+        }
+    }
+
+    /// <summary>Venda do mês, ponto de equilíbrio, resultado e preços da empresa (a partir do que está guardado no portal).</summary>
+    private async Task<(ResumoVendas?, ResumoPrecos?)> ResumirAsync(ApplicationDbContext db, Cliente c)
+    {
+        ResumoVendas? v = null;
+        if (acesso.VeDre)
+        {
+            // Último mês com receita e os 13 meses antes dele (mês anterior, mesmo mês do ano passado e base do PE)
+            var ultimo = await db.LancamentosDre.Where(l => l.ClienteId == c.Id && l.Grupo == GrupoDre.ReceitaBruta && l.Valor > 0)
+                .MaxAsync(l => (DateOnly?)l.Competencia);
+            if (ultimo is DateOnly fim)
+            {
+                var inicio = fim.AddMonths(-13);
+                var lancamentos = await db.LancamentosDre.AsNoTracking()
+                    .Where(l => l.ClienteId == c.Id && l.Competencia >= inicio && l.Competencia <= fim).ToListAsync();
+                v = PainelResumo.Resumir(lancamentos, DataDosDados.Referencia(c.DreDadosDe, c.DreAtualizadoEm));
+            }
+        }
+
+        var produtos = await db.Produtos.AsNoTracking().Where(p => p.ClienteId == c.Id && p.QtdMes > 0).ToListAsync();
+        var p = produtos.Count > 0 ? PainelResumo.ResumirPrecos(c, produtos) : null;
+        return (v, p);
+    }
+}

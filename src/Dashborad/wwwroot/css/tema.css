@@ -1,0 +1,124 @@
+/*
+  TEMA DO PORTAL — todas as cores ficam aqui.
+  Para aplicar a paleta oficial, troque só os valores das variáveis abaixo.
+*/
+:root {
+    /* Paleta Vogel (extraída do logo e materiais em "Imagens Vogel") */
+    --cor-primaria: #0e6f8e;          /* azul petróleo - "Gestão e Tecnologia" */
+    --cor-primaria-escura: #0b5670;
+    --cor-marinho: #0b1f45;           /* azul marinho - "VOGEL" */
+    --cor-destaque: #22b3c8;          /* ciano dos detalhes */
+    --cor-secundaria: #5b6b80;
+    --cor-sucesso: #1f9d6b;
+    --cor-atencao: #d99a00;
+    --cor-critico: #c0392b;
+    --cor-info: #0e6f8e;
+    --cor-whatsapp: #1f9d55;
+
+    --cor-fundo: #f3f6f9;
+    --cor-superficie: #ffffff;
+    --cor-borda: #dfe6ee;
+    --cor-texto: #0b1f45;
+    --cor-texto-suave: #5b6b80;
+
+    --cor-menu-fundo: linear-gradient(180deg, #0b1f45 0%, #0f2f5c 65%, #0e5673 100%);
+
+    /* Séries dos gráficos */
+    --grafico-1: #0b1f45;
+    --grafico-2: #22b3c8;
+    --grafico-3: #0e6f8e;
+    --grafico-4: #c0392b;
+
+    --fonte: 'Montserrat', 'Segoe UI', Arial, sans-serif;
+    --raio: 12px;
+
+    --bs-primary: var(--cor-primaria);
+    --bs-link-color: var(--cor-primaria);
+}
+
+html, body { font-family: var(--fonte); }
+h1, h2, h3, h4, h5 { color: var(--cor-marinho); font-weight: 700; }
+.titulo-destaque { color: var(--cor-primaria); }
+
+.marca {
+    background: #fff;
+    padding: .6rem 1rem;
+    display: flex;
+    align-items: center;
+    height: 3.5rem;
+}
+.marca img { max-height: 2.6rem; max-width: 100%; }
+
+.btn-whatsapp { background: var(--cor-whatsapp); border-color: var(--cor-whatsapp); color: #fff; }
+.btn-whatsapp:hover { filter: brightness(.92); color: #fff; }
+
+.vobo { display: flex; gap: 1rem; align-items: center; }
+.vobo img { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 3px solid var(--cor-destaque); }
+
+body {
+    background: var(--cor-fundo);
+    color: var(--cor-texto);
+}
+
+a, .btn-link { color: var(--cor-primaria); }
+
+.btn-primary {
+    background-color: var(--cor-primaria);
+    border-color: var(--cor-primaria);
+}
+.btn-primary:hover, .btn-primary:focus {
+    background-color: var(--cor-primaria-escura);
+    border-color: var(--cor-primaria-escura);
+}
+
+.cartao {
+    background: var(--cor-superficie);
+    border: 1px solid var(--cor-borda);
+    border-radius: var(--raio);
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+}
+
+.kpi { height: 100%; }
+.kpi .rotulo { color: var(--cor-texto-suave); font-size: .85rem; }
+.kpi .valor { font-size: 1.6rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kpi .detalhe { color: var(--cor-texto-suave); font-size: .8rem; }
+.kpi .comparacoes { margin-top: .35rem; }
+.dados-atualizados { font-size: .85rem; color: var(--cor-texto-suave); }
+
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.negativo { color: var(--cor-critico); }
+.positivo { color: var(--cor-sucesso); }
+
+.selo { display: inline-block; padding: .15rem .55rem; border-radius: 999px; font-size: .75rem; font-weight: 600; }
+.selo-Critico, .selo-Erro { background: color-mix(in srgb, var(--cor-critico) 15%, transparent); color: var(--cor-critico); }
+.selo-Atencao { background: color-mix(in srgb, var(--cor-atencao) 18%, transparent); color: #8a6200; }
+.selo-Info, .selo-Notificado { background: color-mix(in srgb, var(--cor-info) 15%, transparent); color: var(--cor-info); }
+.selo-Novo { background: color-mix(in srgb, var(--cor-primaria) 15%, transparent); color: var(--cor-primaria); }
+.selo-Resolvido { background: color-mix(in srgb, var(--cor-sucesso) 15%, transparent); color: var(--cor-sucesso); }
+
+.table-dre td, .table-dre th { padding: .35rem .5rem; font-size: .85rem; }
+.table-dre tr.total td { font-weight: 600; background: color-mix(in srgb, var(--cor-primaria) 6%, transparent); }
+.table-wrap { overflow-x: auto; }
+
+.area-grafico { position: relative; height: 320px; }
+
+/* Título com explicação ao passar o mouse */
+.dica { cursor: help; text-decoration: underline dotted; text-decoration-color: var(--cor-texto-suave); text-underline-offset: 3px; }
+
+.sql { font-family: Consolas, 'Courier New', monospace; font-size: .85rem; }
+
+.cabecalho-pagina { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.cabecalho-pagina h1 { font-size: 1.6rem; margin: 0; }
+
+/* Cliente em foco (topo) */
+.seletor-cliente { min-width: 220px; max-width: 360px; font-weight: 600; }
+
+/* Comercial: relatório de metas (blocos Diário | Acumulado | Ano anterior | Meta geral) */
+.tabela-metas td, .tabela-metas th { font-size: .8rem; padding: .25rem .4rem; white-space: nowrap; }
+.tabela-metas tr.grupos th { background: color-mix(in srgb, var(--cor-primaria) 10%, transparent); text-transform: uppercase; font-size: .72rem; letter-spacing: .03em; }
+.tabela-metas tr.total td { font-weight: 600; background: color-mix(in srgb, var(--cor-primaria) 6%, transparent); }
+.tabela-metas td:nth-child(2), .tabela-metas td:nth-child(8), .tabela-metas td:nth-child(14), .tabela-metas td:nth-child(17),
+.tabela-metas tr:not(.grupos) th:nth-child(2), .tabela-metas tr:not(.grupos) th:nth-child(8), .tabela-metas tr:not(.grupos) th:nth-child(14), .tabela-metas tr:not(.grupos) th:nth-child(17),
+.tabela-metas tr.grupos th:not(:first-child) { border-left: 2px solid color-mix(in srgb, var(--cor-primaria) 25%, transparent); }
+.tabela-metas input { min-width: 6.5rem; }

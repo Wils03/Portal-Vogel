@@ -1,0 +1,12 @@
+bin/
+obj/
+publicar/
+.tmpbuild/
+.vs/
+*.db
+*.db-*
+*.user
+**/Data/keys/
+appsettings.*.local.json
+*.csv
+docs/privado/

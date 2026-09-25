@@ -1,0 +1,256 @@
+@page "/clientes"
+@attribute [Authorize(Roles = Perfis.Administrador)]
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject BancoClienteService Bancos
+@inject ClienteAtualService ClienteAtual
+
+<PageTitle>Clientes · Vogel</PageTitle>
+
+<div class="cabecalho-pagina">
+    <h1>Clientes e conexões</h1>
+    <button class="btn btn-primary" @onclick="Novo"><i class="bi bi-plus-lg"></i> Novo cliente</button>
+</div>
+
+@if (editando is not null)
+{
+    <div class="cartao">
+        <h2 class="h5">@(editando.Id == 0 ? "Novo cliente" : $"Editar: {editando.Nome}")</h2>
+        <EditForm Model="editando" OnValidSubmit="Salvar" FormName="cliente">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="text-danger" />
+            <div class="row g-3">
+                <div class="col-md-6"><label class="form-label">Nome / razão social</label><InputText class="form-control" @bind-Value="editando.Nome" /></div>
+                <div class="col-md-3"><label class="form-label">CNPJ</label><InputText class="form-control" @bind-Value="editando.Cnpj" /></div>
+                <div class="col-md-3 d-flex align-items-end"><div class="form-check"><InputCheckbox class="form-check-input" id="ativo" @bind-Value="editando.Ativo" /><label class="form-check-label" for="ativo">Ativo</label></div></div>
+                <div class="col-md-6"><label class="form-label">Contato (nome usado nas mensagens)</label><InputText class="form-control" @bind-Value="editando.Contato" /></div>
+                <div class="col-md-6"><label class="form-label">WhatsApp (DDI + DDD + número)</label><InputText class="form-control" placeholder="5551999999999" @bind-Value="editando.WhatsApp" /></div>
+
+                <div class="col-md-3">
+                    <label class="form-label">Banco de dados</label>
+                    <InputSelect class="form-select" @bind-Value="editando.TipoBanco">
+                        @foreach (var t in Enum.GetValues<TipoBanco>()) { <option value="@t">@Rotulos.Texto(t)</option> }
+                    </InputSelect>
+                </div>
+                <div class="col-md-9">
+                    <label class="form-label">String de conexão @(editando.ConexaoCriptografada is null ? "" : "(deixe em branco para manter a atual)")</label>
+                    <input type="password" class="form-control sql" autocomplete="new-password" @bind="novaConexao" @bind:event="oninput" placeholder="@BancoClienteService.ExemploConexao(editando.TipoBanco)" />
+                    <div class="form-text">Fica criptografada no servidor. Use um usuário de banco <strong>somente leitura</strong>.</div>
+                </div>
+                <div class="col-12">
+                    <div class="form-check">
+                        <InputCheckbox class="form-check-input" id="rotinasBaseLv" @bind-Value="editando.RotinasPelaBaseLv" />
+                        <label class="form-check-label" for="rotinasBaseLv">Rotinas e alertas pela BASELV</label>
+                    </div>
+                    <div class="form-text mt-0 mb-2">Marque quando o SincronizadorLV já estiver rodando no servidor do cliente com as rotinas: o portal lê o resultado da tabela <code>LV_Rotina</code> e não consulta mais a BASE do ERP.</div>
+                    <button type="button" class="btn btn-outline-primary btn-sm" @onclick="Testar" disabled="@testando">
+                        @if (testando)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                            <span>Testando conexão... (pode levar até 15 segundos)</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-plug"></i> <span>Testar conexão</span>
+                        }
+                    </button>
+                    @if (resultadoTeste is not null)
+                    {
+                        <div class="alert @(testeOk ? "alert-success" : "alert-danger") mt-2 mb-0 small" role="status">
+                            <i class="bi @(testeOk ? "bi-check-circle" : "bi-x-circle") me-1"></i>
+                            <strong>@(testeOk ? "Conexão OK." : "Falha na conexão:")</strong> @resultadoTeste
+                        </div>
+                    }
+                </div>
+                <div class="col-12"><h3 class="h6 mt-2 mb-0">Parâmetros de precificação</h3></div>
+                <div class="col-6 col-md-2"><label class="form-label">Impostos s/ venda %</label><InputNumber ParsingErrorMessage="O campo {0} deve ser um número." class="form-control" @bind-Value="editando.ImpostosPct" /></div>
+                <div class="col-6 col-md-2"><label class="form-label">Comissão %</label><InputNumber ParsingErrorMessage="O campo {0} deve ser um número." class="form-control" @bind-Value="editando.ComissaoPct" /></div>
+                <div class="col-6 col-md-2"><label class="form-label">Outros variáveis %</label><InputNumber ParsingErrorMessage="O campo {0} deve ser um número." class="form-control" @bind-Value="editando.OutrosVariaveisPct" /></div>
+                <div class="col-6 col-md-2"><label class="form-label">Margem desejada %</label><InputNumber ParsingErrorMessage="O campo {0} deve ser um número." class="form-control" @bind-Value="editando.MargemDesejadaPct" /></div>
+                <div class="col-6 col-md-2"><label class="form-label">Custos fixos / mês</label><InputNumber ParsingErrorMessage="O campo {0} deve ser um número." class="form-control" @bind-Value="editando.CustosFixosMensais" /></div>
+                <div class="col-6 col-md-2"><label class="form-label">Faturamento médio / mês</label><InputNumber ParsingErrorMessage="O campo {0} deve ser um número." class="form-control" @bind-Value="editando.FaturamentoMedioMensal" /></div>
+
+                <div class="col-12"><label class="form-label">Observações</label><InputTextArea class="form-control" rows="2" @bind-Value="editando.Observacoes" /></div>
+                <div class="col-12 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary">Salvar</button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => editando = null">Cancelar</button>
+                </div>
+            </div>
+        </EditForm>
+    </div>
+}
+
+@if (excluindo is not null && resumoExclusao is not null)
+{
+    <div class="cartao border border-danger">
+        <h2 class="h5 negativo"><i class="bi bi-exclamation-triangle"></i> Excluir cliente: @excluindo.Nome</h2>
+        <p class="small mb-2">
+            Apaga <strong>só do portal</strong> (o banco do cliente não é tocado) e <strong>não tem volta</strong>:
+        </p>
+        <ul class="small mb-2">
+            <li>cadastro e conexão salva (criptografada), SQLs da DRE e da precificação, parâmetros e contato de preços;</li>
+            <li>@resumoExclusao.Produtos.ToString("N0") produto(s) da precificação e @resumoExclusao.Lancamentos.ToString("N0") lançamento(s) da DRE;</li>
+            <li>@resumoExclusao.Alertas.ToString("N0") alerta(s) e @resumoExclusao.Programacoes programação(ões) de rotina;</li>
+            <li>@resumoExclusao.Usuarios usuário(s) da empresa serão <strong>desativados</strong> (não entram mais).</li>
+        </ul>
+        <p class="small text-muted mb-2">O histórico de @resumoExclusao.Mensagens.ToString("N0") mensagem(ns) de WhatsApp fica guardado como registro do que foi enviado.
+            Se quiser só parar de consultar, use "Ativo" no Editar (dá para voltar).</p>
+        <div class="row g-2 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label small">Para confirmar, digite o nome do cliente: <strong>@excluindo.Nome</strong></label>
+                <input class="form-control" @bind="confirmacaoNome" @bind:event="oninput" autocomplete="off" />
+            </div>
+            <div class="col-md-7 d-flex gap-2">
+                <button class="btn btn-danger" @onclick="ConfirmarExclusao" disabled="@(!NomeConfere || ocupadoExclusao)">
+                    @if (ocupadoExclusao) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    <i class="bi bi-trash"></i> Excluir definitivamente
+                </button>
+                <button class="btn btn-outline-secondary" @onclick="CancelarExclusao">Cancelar</button>
+            </div>
+        </div>
+    </div>
+}
+@if (avisoExclusao is not null) { <div class="alert alert-success small">@avisoExclusao</div> }
+
+<div class="cartao">
+    <input class="form-control mb-2" placeholder="Buscar por nome ou CNPJ..." @bind="filtro" @bind:event="oninput" />
+    <div class="table-wrap">
+        <table class="table table-hover align-middle m-0">
+            <thead><tr><th>Cliente</th><th>CNPJ</th><th>Banco</th><th>Conexão</th><th>WhatsApp</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var c in Filtrados)
+                {
+                    <tr class="@(c.Ativo ? "" : "text-muted")">
+                        <td>@c.Nome @if (!c.Ativo) { <span class="small">(inativo)</span> }</td>
+                        <td>@c.Cnpj</td>
+                        <td>@Rotulos.Texto(c.TipoBanco)</td>
+                        <td>@(c.ConexaoCriptografada is null ? "—" : "configurada")</td>
+                        <td>@c.WhatsApp</td>
+                        <td class="text-end text-nowrap">
+                            <button class="btn btn-sm btn-outline-primary" @onclick="() => Editar(c)">Editar</button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => PedirExclusao(c)" title="Apaga o cliente e os dados dele do portal"><i class="bi bi-trash"></i> Excluir</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private List<Cliente> clientes = [];
+    private Cliente? editando;
+    private string? novaConexao, resultadoTeste, filtro;
+    private bool testando, testeOk;
+
+    // Exclusão (só do portal)
+    private Cliente? excluindo;
+    private ResumoExclusao? resumoExclusao;
+    private string? confirmacaoNome, avisoExclusao;
+    private bool ocupadoExclusao;
+
+    private bool NomeConfere => excluindo is not null && string.Equals(confirmacaoNome?.Trim(), excluindo.Nome.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private async Task PedirExclusao(Cliente c)
+    {
+        editando = null;
+        avisoExclusao = null;
+        confirmacaoNome = null;
+        excluindo = c;
+        resumoExclusao = await ExclusaoCliente.ContarAsync(Fabrica, c.Id);
+    }
+
+    private void CancelarExclusao() { excluindo = null; resumoExclusao = null; confirmacaoNome = null; }
+
+    private async Task ConfirmarExclusao()
+    {
+        if (excluindo is null || !NomeConfere) return;
+        ocupadoExclusao = true;
+        try
+        {
+            var nome = excluindo.Nome;
+            var id = excluindo.Id;
+            await ExclusaoCliente.ExcluirAsync(Fabrica, id);
+            if (ClienteAtual.ClienteId == id) await ClienteAtual.DefinirAsync(0);
+            CancelarExclusao();
+            avisoExclusao = $"Cliente \"{nome}\" excluído do portal.";
+            await Carregar();
+        }
+        finally { ocupadoExclusao = false; }
+    }
+
+    private IEnumerable<Cliente> Filtrados => string.IsNullOrWhiteSpace(filtro)
+        ? clientes
+        : clientes.Where(c => c.Nome.Contains(filtro, StringComparison.OrdinalIgnoreCase) || (c.Cnpj ?? "").Contains(filtro));
+
+    protected override Task OnInitializedAsync() => Carregar();
+
+    private async Task Carregar()
+    {
+        await using var db = await Fabrica.CreateDbContextAsync();
+        clientes = await db.Clientes.AsNoTracking().OrderBy(c => c.Nome).ToListAsync();
+    }
+
+    private void Novo() => Abrir(new Cliente());
+
+    private void Editar(Cliente c) => Abrir(new Cliente
+    {
+        Id = c.Id, Nome = c.Nome, Cnpj = c.Cnpj, Contato = c.Contato, WhatsApp = c.WhatsApp, Ativo = c.Ativo,
+        TipoBanco = c.TipoBanco, ConexaoCriptografada = c.ConexaoCriptografada, Observacoes = c.Observacoes, SqlDre = c.SqlDre, SqlPrecificacao = c.SqlPrecificacao,
+        ImpostosPct = c.ImpostosPct, ComissaoPct = c.ComissaoPct, OutrosVariaveisPct = c.OutrosVariaveisPct,
+        MargemDesejadaPct = c.MargemDesejadaPct, CustosFixosMensais = c.CustosFixosMensais, FaturamentoMedioMensal = c.FaturamentoMedioMensal,
+        Impressao = c.Impressao, AvisoPrecosNome = c.AvisoPrecosNome, AvisoPrecosWhatsApp = c.AvisoPrecosWhatsApp,
+        DreAtualizadoEm = c.DreAtualizadoEm, DreDadosDe = c.DreDadosDe,
+        PrecificacaoAtualizadoEm = c.PrecificacaoAtualizadoEm, PrecificacaoDadosDe = c.PrecificacaoDadosDe, FilialPrecificacao = c.FilialPrecificacao,
+        RotinasPelaBaseLv = c.RotinasPelaBaseLv,
+        SqlComercial = c.SqlComercial, ComercialAtualizadoEm = c.ComercialAtualizadoEm, ComercialDadosDe = c.ComercialDadosDe
+    });
+
+    private void Abrir(Cliente c)
+    {
+        editando = c;
+        novaConexao = null;
+        resultadoTeste = null;
+    }
+
+    private async Task Testar()
+    {
+        if (editando is null) return;
+        testando = true;
+        resultadoTeste = null;
+        try
+        {
+            var conexao = !string.IsNullOrWhiteSpace(novaConexao) ? novaConexao
+                : editando.ConexaoCriptografada is { } cript ? Bancos.Descriptografar(cript)
+                : throw new InvalidOperationException("Informe a string de conexão.");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            resultadoTeste = await Bancos.TestarAsync(editando.TipoBanco, conexao, cts.Token);
+            testeOk = true;
+        }
+        catch (OperationCanceledException)
+        {
+            resultadoTeste = "o servidor não respondeu em 20 segundos. Verifique IP, porta, firewall/VPN.";
+            testeOk = false;
+        }
+        catch (Exception ex)
+        {
+            resultadoTeste = ex.Message;
+            testeOk = false;
+        }
+        finally { testando = false; }
+    }
+
+    private async Task Salvar()
+    {
+        if (editando is null) return;
+        if (!string.IsNullOrWhiteSpace(novaConexao))
+            editando.ConexaoCriptografada = Bancos.Criptografar(novaConexao.Trim());
+        editando.WhatsApp = MensagemService.SomenteDigitos(editando.WhatsApp) is { Length: > 0 } w ? w : null;
+        editando.Impressao = Cliente.CalcularImpressao(editando.Cnpj);
+
+        await using var db = await Fabrica.CreateDbContextAsync();
+        if (editando.Id == 0) db.Clientes.Add(editando); else db.Clientes.Update(editando);
+        await db.SaveChangesAsync();
+        editando = null;
+        await Carregar();
+    }
+}

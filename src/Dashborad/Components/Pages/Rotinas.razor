@@ -1,0 +1,305 @@
+@page "/rotinas"
+@attribute [Authorize(Roles = Perfis.Gestao)]
+@implements IDisposable
+@inject ClienteAtualService ClienteAtual
+@using System.Data
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject BancoClienteService Bancos
+@inject RotinaService Servico
+@inject MensagemService Mensageiro
+@inject AcessoService Acessos
+
+<PageTitle>Rotinas · Vogel</PageTitle>
+
+@if (acesso.EhCliente)
+{
+    <div class="cabecalho-pagina">
+        <h1>Rotinas · @acesso.ClienteNome</h1>
+    </div>
+    <div class="cartao">
+        <RotinasEmpresa ClienteId="@acesso.ClienteId!.Value" Acesso="@acesso" />
+    </div>
+    return;
+}
+@if (!acesso.EhVogel)
+{
+    return;
+}
+
+<div class="cabecalho-pagina">
+    <h1>Rotinas de verificação</h1>
+    @if (acesso.EditaSql)
+    {
+        <button class="btn btn-primary" @onclick="() => Abrir(new Rotina())"><i class="bi bi-plus-lg"></i> Nova rotina</button>
+    }
+</div>
+
+<p class="text-muted">
+    Cada rotina é um <strong>SELECT</strong> executado no banco de cada cliente. Se retornar um número (ex.: <code>COUNT(*)</code>) ele vira a quantidade;
+    se retornar linhas, conta as linhas. Quando a quantidade passa do limite, gera <strong>um</strong> alerta com a mensagem pronta para o WhatsApp do cliente.
+    Enquanto o problema continuar, o alerta só é atualizado (sem nova mensagem); quando zerar, é resolvido sozinho; se voltar, gera alerta e mensagem de novo.
+    Cada empresa pode desligar a rotina, escolher o horário e desligar o aviso automático para si (veja "Programação por empresa").
+</p>
+
+@if (editando is not null)
+{
+    <div class="cartao">
+        <h2 class="h5">@(editando.Id == 0 ? "Nova rotina" : $"Editar: {editando.Nome}")</h2>
+        <EditForm Model="editando" OnValidSubmit="Salvar" FormName="rotina">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="text-danger" />
+            <div class="row g-3">
+                <div class="col-md-6"><label class="form-label">Nome</label><InputText class="form-control" @bind-Value="editando.Nome" /></div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Banco</label>
+                    <select class="form-select" @bind="tipoBancoTexto">
+                        <option value="">Todos</option>
+                        @foreach (var t in Enum.GetValues<TipoBanco>()) { <option value="@t">@Rotulos.Texto(t)</option> }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label">Severidade</label>
+                    <InputSelect class="form-select" @bind-Value="editando.Severidade">
+                        @foreach (var s in Enum.GetValues<Severidade>()) { <option value="@s">@Rotulos.Texto(s)</option> }
+                    </InputSelect>
+                </div>
+                <div class="col-6 col-md-1"><label class="form-label"><span class="dica" title="Só gera alerta quando a quantidade encontrada for maior que este valor.">Limite</span></label><InputNumber ParsingErrorMessage="O campo {0} deve ser um número." class="form-control" @bind-Value="editando.Limite" /></div>
+                <div class="col-6 col-md-1">
+                    <label class="form-label"><span class="dica" title="Horário padrão (0 a 23) em que a rotina roda sozinha. Cada empresa pode escolher outro. Vazio = só manual (a empresa ainda pode escolher um horário).">Hora</span></label>
+                    <InputNumber ParsingErrorMessage="O campo {0} deve ser um número." class="form-control" @bind-Value="editando.HoraExecucao" placeholder="—" min="0" max="23" />
+                </div>
+                <div class="col-12"><label class="form-label">Descrição</label><InputText class="form-control" @bind-Value="editando.Descricao" /></div>
+                <div class="col-12"><label class="form-label">SQL (somente SELECT)</label><InputTextArea class="form-control sql" rows="6" @bind-Value="editando.Sql" /></div>
+                <div class="col-12">
+                    <label class="form-label">Mensagem para o cliente</label>
+                    <InputTextArea class="form-control" rows="3" @bind-Value="editando.ModeloMensagem" />
+                    <div class="form-text">Variáveis: <code>{cliente}</code> (contato), <code>{empresa}</code>, <code>{quantidade}</code>, <code>{rotina}</code>, <code>{data}</code>.</div>
+                </div>
+                <div class="col-12"><div class="form-check"><InputCheckbox class="form-check-input" id="ativa" @bind-Value="editando.Ativa" /><label class="form-check-label" for="ativa"><span class="dica" title="Desligada: não roda para nenhuma empresa e some da tela das empresas. Ligada: cada empresa pode desligar para si e escolher o horário.">Liberada (roda no horário padrão ou no escolhido por cada empresa)</span></label></div></div>
+                <div class="col-12">
+                    <div class="form-check">
+                        <InputCheckbox class="form-check-input" id="auto" @bind-Value="editando.EnviarAutomaticamente" />
+                        <label class="form-check-label" for="auto">
+                            <span class="dica" title="Quando surgir um alerta NOVO, a mensagem vai sozinha pelo Pagebot para o WhatsApp do cliente — uma vez só por ocorrência. Cada empresa pode desligar o aviso para si; se aqui estiver desligado, nenhuma empresa consegue ligar.">Permitir aviso automático pelo WhatsApp (Pagebot)</span>
+                        </label>
+                    </div>
+                    @if (editando.EnviarAutomaticamente)
+                    {
+                        <div class="small mt-1 @(Mensageiro.EnvioAutomatico ? "text-muted" : "negativo")">
+                            @if (Mensageiro.EnvioAutomatico)
+                            {
+                                <span>Envia só em alertas novos, em horário comercial (@Mensageiro.DescricaoHorario), uma mensagem por cliente por dia, com intervalo entre envios e limite diário. @(Mensageiro.ModoTeste ? "MODO TESTE: vai para o número de teste, não para o cliente." : "") Veja e simule em Mensagens.</span>
+                            }
+                            else
+                            {
+                                <span>O Pagebot ainda não está configurado (token/Modo). Os alertas serão criados, mas o envio continuará manual.</span>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
+                    <button type="submit" class="btn btn-primary">Salvar</button>
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => editando = null">Cancelar</button>
+                    <span class="ms-md-auto small text-muted">Testar em:</span>
+                    <select class="form-select form-select-sm w-auto" @bind="clienteTesteId">
+                        <option value="0">escolha um cliente</option>
+                        @foreach (var c in clientes) { <option value="@c.Id">@c.Nome</option> }
+                    </select>
+                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="TestarSql" disabled="@ocupado"><i class="bi bi-play"></i> Testar SQL</button>
+                </div>
+            </div>
+        </EditForm>
+
+        @if (erroTeste is not null) { <div class="alert alert-danger mt-3 mb-0">@erroTeste</div> }
+        @if (tabelaTeste is not null)
+        {
+            <div class="mt-3">
+                <strong>Quantidade: @RotinaService.ExtrairQuantidade(tabelaTeste).ToString("N0")</strong>
+                <span class="text-muted small">(@tabelaTeste.Rows.Count linha(s), mostrando até 20)</span>
+                <div class="table-wrap mt-2">
+                    <table class="table table-sm table-bordered small">
+                        <thead><tr>@foreach (DataColumn col in tabelaTeste.Columns) { <th>@col.ColumnName</th> }</tr></thead>
+                        <tbody>
+                            @foreach (DataRow row in tabelaTeste.Rows.Cast<DataRow>().Take(20))
+                            {
+                                <tr>@foreach (var v in row.ItemArray) { <td>@v</td> }</tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (resultados is not null)
+{
+    <div class="cartao">
+        <div class="d-flex justify-content-between"><h2 class="h5">Resultado da execução</h2><button class="btn-close" @onclick="() => resultados = null"></button></div>
+        <table class="table table-sm m-0">
+            <thead><tr><th>Cliente</th><th class="num">Quantidade</th><th>Situação</th></tr></thead>
+            <tbody>
+                @foreach (var r in resultados)
+                {
+                    <tr>
+                        <td>@r.Cliente</td>
+                        <td class="num">@r.Quantidade?.ToString("N0")</td>
+                        <td>
+                            @switch (r.Situacao)
+                            {
+                                case SituacaoRotina.Erro:
+                                    <span class="selo selo-Erro" title="@r.Erro">Erro</span> <span class="small text-muted">@r.Erro</span>
+                                    break;
+                                case SituacaoRotina.AlertaNovo:
+                                    <span class="selo selo-Atencao">Alerta novo</span>
+                                    break;
+                                case SituacaoRotina.AlertaAtualizado:
+                                    <span class="selo selo-Info" title="Já existia alerta aberto: só atualizou a quantidade, sem nova mensagem.">Alerta atualizado</span>
+                                    break;
+                                case SituacaoRotina.Resolvido:
+                                    <span class="selo selo-Resolvido" title="A rotina não encontrou mais ocorrências: o alerta aberto foi resolvido.">Resolvido automaticamente</span>
+                                    break;
+                                default:
+                                    <span class="selo selo-Resolvido">OK</span>
+                                    break;
+                            }
+                        </td>
+                    </tr>
+                }
+                @if (resultados.Count == 0) { <tr><td colspan="3" class="text-muted">Nenhum cliente ativo com conexão compatível.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+}
+
+<div class="cartao">
+    <table class="table table-hover align-middle m-0">
+        <thead><tr><th>Rotina</th><th>Banco</th><th>Severidade</th><th>Horário</th><th>Última execução</th><th></th></tr></thead>
+        <tbody>
+            @foreach (var r in rotinas)
+            {
+                <tr class="@(r.Ativa ? "" : "text-muted")">
+                    <td>@r.Nome @if (!r.Ativa) { <span class="small">(inativa)</span> }
+                        @if (r.EnviarAutomaticamente) { <i class="bi bi-whatsapp ms-1" style="color: var(--cor-whatsapp)" title="Envia automaticamente pelo Pagebot"></i> }
+                        <div class="small text-muted">@r.Descricao</div></td>
+                    <td>@(r.TipoBanco is { } tb ? Rotulos.Texto(tb) : "Todos")</td>
+                    <td><span class="selo selo-@r.Severidade">@Rotulos.Texto(r.Severidade)</span></td>
+                    <td>@(r.HoraExecucao is int h ? $"{h:00}:00" : "manual")</td>
+                    <td>@(r.UltimaExecucao?.ToString("dd/MM/yyyy HH:mm") ?? "—")</td>
+                    <td class="text-end text-nowrap">
+                        <button class="btn btn-sm btn-outline-success" @onclick="() => Executar(r)" disabled="@ocupado"><i class="bi bi-play-fill"></i> Executar agora</button>
+                        @if (acesso.EditaSql) { <button class="btn btn-sm btn-outline-primary" @onclick="() => Abrir(r)">Editar</button> }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<div class="cartao">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <h2 class="h5 m-0">Programação por empresa@(ClienteAtual.Nome is string n ? $" · {n}" : "")</h2>
+    </div>
+    @if (ClienteAtual.ClienteId > 0)
+    {
+        <RotinasEmpresa ClienteId="@ClienteAtual.ClienteId" Acesso="@acesso" />
+    }
+    else
+    {
+        <div class="small text-muted">Escolha o cliente no topo da tela. É o que o gestor de cada empresa vê e ajusta em Rotinas: ligar/desligar, horário e aviso automático. O SQL fica só aqui em cima.</div>
+    }
+</div>
+
+@code {
+    private List<Rotina> rotinas = [];
+    private List<Cliente> clientes = [];
+    private Rotina? editando;
+    private int clienteTesteId;
+    private bool ocupado;
+    private DataTable? tabelaTeste;
+    private string? erroTeste;
+    private List<ResultadoRotina>? resultados;
+    private Acesso acesso = Acesso.Nenhum;
+
+    private string tipoBancoTexto
+    {
+        get => editando?.TipoBanco?.ToString() ?? "";
+        set { if (editando is not null) editando.TipoBanco = Enum.TryParse<TipoBanco>(value, out var t) ? t : null; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        acesso = await Acessos.ObterAsync();
+        ClienteAtual.Mudou += AoMudarCliente;
+        if (!acesso.EhVogel) return;
+        clienteTesteId = ClienteAtual.ClienteId;
+        await Carregar();
+    }
+
+    private Task AoMudarCliente() => InvokeAsync(() => { clienteTesteId = ClienteAtual.ClienteId; StateHasChanged(); });
+
+    public void Dispose() => ClienteAtual.Mudou -= AoMudarCliente;
+
+    private async Task Carregar()
+    {
+        await using var db = await Fabrica.CreateDbContextAsync();
+        rotinas = await db.Rotinas.AsNoTracking().OrderBy(r => r.Nome).ToListAsync();
+        clientes = await db.Clientes.AsNoTracking().Where(c => c.Ativo && c.ConexaoCriptografada != null).OrderBy(c => c.Nome).ToListAsync();
+    }
+
+    private void Abrir(Rotina r)
+    {
+        if (!acesso.EditaSql) return;
+        editando = new Rotina
+        {
+            Id = r.Id, Nome = r.Nome, Descricao = r.Descricao, TipoBanco = r.TipoBanco, Sql = r.Sql, Severidade = r.Severidade,
+            Limite = r.Limite, ModeloMensagem = r.ModeloMensagem, Ativa = r.Ativa, HoraExecucao = r.HoraExecucao, UltimaExecucao = r.UltimaExecucao,
+            EnviarAutomaticamente = r.EnviarAutomaticamente
+        };
+        tabelaTeste = null;
+        erroTeste = null;
+    }
+
+    private async Task Salvar()
+    {
+        if (editando is null || !acesso.EditaSql) return;
+        erroTeste = null;
+        try { BancoClienteService.ValidarSomenteLeitura(editando.Sql); }
+        catch (Exception ex) { erroTeste = ex.Message; return; }
+        if (editando.HoraExecucao is < 0 or > 23) { erroTeste = "A hora deve estar entre 0 e 23."; return; }
+
+        await using var db = await Fabrica.CreateDbContextAsync();
+        if (editando.Id == 0) db.Rotinas.Add(editando); else db.Rotinas.Update(editando);
+        await db.SaveChangesAsync();
+        editando = null;
+        await Carregar();
+    }
+
+    private async Task TestarSql()
+    {
+        if (editando is null) return;
+        tabelaTeste = null;
+        erroTeste = null;
+        if (!acesso.ConsultaBancoCliente) return;
+        var cliente = clientes.FirstOrDefault(c => c.Id == clienteTesteId);
+        if (cliente is null) { erroTeste = "Escolha um cliente com conexão configurada."; return; }
+
+        ocupado = true;
+        try { tabelaTeste = await Bancos.ConsultarAsync(cliente, editando.Sql); }
+        catch (Exception ex) { erroTeste = ex.Message; }
+        finally { ocupado = false; }
+    }
+
+    private async Task Executar(Rotina r)
+    {
+        if (!acesso.EhVogel) return;
+        ocupado = true;
+        try
+        {
+            resultados = await Servico.ExecutarAsync(r.Id);
+            await Carregar();
+        }
+        finally { ocupado = false; }
+    }
+}

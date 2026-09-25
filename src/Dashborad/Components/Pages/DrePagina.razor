@@ -1,0 +1,356 @@
+@page "/dre"
+@attribute [Authorize(Roles = Perfis.Gestao)]
+@implements IDisposable
+@inject ClienteAtualService ClienteAtual
+@using System.Data
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject BancoClienteService Bancos
+@inject IJSRuntime JS
+@inject AcessoService Acessos
+
+<PageTitle>DRE · Vogel</PageTitle>
+
+<div class="cabecalho-pagina">
+    <h1>DRE gerencial@(clienteId > 0 ? $" · {clientes.FirstOrDefault(c => c.Id == clienteId)?.Nome}" : "")</h1>
+    <div class="d-flex flex-wrap gap-2">
+        <select class="form-select w-auto" @bind="ano" @bind:after="Carregar">
+            @for (var a = DateTime.Today.Year; a >= DateTime.Today.Year - 5; a--) { <option value="@a">@a</option> }
+        </select>
+    </div>
+</div>
+
+@if (clienteId == 0)
+{
+    <div class="cartao text-muted">@(acesso.EhVogel ? "Escolha o cliente no topo da tela para ver a DRE. Os lançamentos podem vir de planilha (CSV/XLSX) ou de uma consulta no banco do cliente." : "Seu usuário não está ligado a uma empresa ativa. Fale com a Vogel.")</div>
+}
+else
+{
+    @if (linhas is not null && TemDados)
+    {
+        var rb = linhas[0].Ano;
+        var ll = linhas[^1].Ano;
+        var lb = linhas.First(l => l.Titulo == "= Lucro bruto").Ano;
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-lg-3"><div class="cartao kpi"><div class="rotulo"><span class="dica" title="Total vendido no ano (NF-e, NFC-e e vendas sem nota), antes de impostos e devoluções.">Receita bruta @ano</span></div><div class="valor">@rb.ToString("C0")</div></div></div>
+            <div class="col-6 col-lg-3"><div class="cartao kpi"><div class="rotulo"><span class="dica" title="Lucro bruto ÷ receita bruta: quanto sobra da venda depois de impostos, devoluções e custo das mercadorias.">Margem bruta</span></div><div class="valor">@(rb != 0 ? (lb / rb).ToString("P1") : "—")</div></div></div>
+            <div class="col-6 col-lg-3"><div class="cartao kpi"><div class="rotulo"><span class="dica" title="Resultado final do ano depois de todas as despesas.">Lucro líquido</span></div><div class="valor @(ll < 0 ? "negativo" : "")">@ll.ToString("C0")</div></div></div>
+            <div class="col-6 col-lg-3"><div class="cartao kpi"><div class="rotulo"><span class="dica" title="Lucro líquido ÷ receita bruta: quanto de cada R$ 100 vendidos virou lucro.">Margem líquida</span></div><div class="valor @(ll < 0 ? "negativo" : "")">@(rb != 0 ? (ll / rb).ToString("P1") : "—")</div></div></div>
+        </div>
+
+        @if (pe is not null || mesesDisponiveis.Count > 0)
+        {
+            <div class="cartao">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                    <h2 class="h5 m-0">Ponto de equilíbrio</h2>
+                    @if (acesso.Altera) { <button class="btn btn-sm btn-outline-primary" @onclick="UsarNaPrecificacao" disabled="@(pe is null)"><i class="bi bi-calculator"></i> Usar na precificação</button> }
+                </div>
+                @if (pe is null)
+                {
+                    <div class="text-muted">Selecione ao menos um mês.</div>
+                }
+                else
+                {
+                <div class="row g-3">
+                    <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="Faturamento mínimo por mês para pagar todas as despesas fixas, sem lucro nem prejuízo.">Ponto de equilíbrio / mês</span></div><div class="valor">@pe.PontoEquilibrio.ToString("C0")</div><div class="detalhe">custos fixos ÷ margem de contribuição</div></div></div>
+                    <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="Média da receita bruta dos meses marcados abaixo.">Faturamento médio / mês</span></div><div class="valor">@pe.FaturamentoMedio.ToString("C0")</div><div class="detalhe">@pe.Meses mês(es) considerados</div></div></div>
+                    <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="Quanto o faturamento pode cair antes de dar prejuízo.">Margem de segurança</span></div><div class="valor @(pe.MargemSeguranca < 0 ? "negativo" : "positivo")">@pe.MargemSeguranca.ToString("P1")</div><div class="detalhe">quanto a venda pode cair até o lucro zero</div></div></div>
+                    <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="O que sobra de cada venda após impostos, devoluções e custo das mercadorias, para pagar as despesas fixas.">Margem de contribuição</span></div><div class="valor">@pe.MargemContribuicaoPct.ToString("P1")</div><div class="detalhe">deduções @pe.DeducoesPct.ToString("P1") · CMV @pe.CmvPct.ToString("P1")</div></div></div>
+                </div>
+                }
+                <div class="small text-muted mt-3 mb-1">
+                    Meses na média (clique para incluir/excluir). Meses com poucos dias de venda ou com contas ainda não lançadas ficam desmarcados:
+                </div>
+                <div class="d-flex flex-wrap gap-1">
+                    @foreach (var m in mesesDisponiveis)
+                    {
+                        <button class="btn btn-sm @(mesesPe.Contains(m) ? "btn-primary" : "btn-outline-secondary")" @onclick="() => AlternarMes(m)">@Meses[m.Month - 1]/@(m.Year % 100)</button>
+                    }
+                </div>
+                <div class="small text-muted mt-2">Custos fixos médios: @(pe?.CustosFixosMedios.ToString("C0") ?? "—")/mês (despesas operacionais + financeiras).</div>
+            </div>
+        }
+
+        <div class="cartao">
+            <h2 class="h5">Receita x Lucro líquido por mês</h2>
+            <div class="area-grafico"><canvas id="graficoDre"></canvas></div>
+        </div>
+
+        <div class="cartao">
+            <div class="table-wrap">
+                <table class="table table-dre m-0">
+                    <thead>
+                        <tr><th></th>@foreach (var m in Meses) { <th class="num">@m</th> }<th class="num">Total</th><th class="num"><span class="dica" title="Análise vertical: quanto cada linha representa da receita bruta do ano.">AV%</span></th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var l in linhas)
+                        {
+                            <tr class="@(l.Total ? "total" : "")">
+                                <td class="text-nowrap"><span class="@(DicasDre.ContainsKey(l.Titulo) ? "dica" : "")" title="@DicasDre.GetValueOrDefault(l.Titulo)">@l.Titulo</span></td>
+                                @foreach (var v in l.Meses) { <td class="num @(l.Total && v < 0 ? "negativo" : "")">@(v == 0 ? "–" : v.ToString("N0"))</td> }
+                                <td class="num @(l.Total && l.Ano < 0 ? "negativo" : "")">@l.Ano.ToString("N0")</td>
+                                <td class="num">@(rb != 0 ? (l.Ano / rb).ToString("P1") : "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div class="small text-muted mt-2">AV% = análise vertical (percentual sobre a receita bruta).</div>
+        </div>
+    }
+    else
+    {
+        <div class="cartao text-muted">Sem lançamentos para @ano.@(acesso.Altera ? " Importe abaixo." : "")</div>
+    }
+
+    <div class="cartao">
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+            <h2 class="h5 m-0 me-auto">Lançamentos</h2>
+            @if (acesso.Altera)
+            {
+                <label class="btn btn-sm btn-outline-secondary m-0">
+                    <i class="bi bi-upload"></i> Importar CSV/XLSX
+                    <InputFile class="d-none" OnChange="Importar" accept=".csv,.xlsx" />
+                </label>
+            }
+            @if (acesso.EditaSql) { <button class="btn btn-sm btn-outline-secondary" @onclick="() => mostrarSql = !mostrarSql"><i class="bi bi-database"></i> SQL do banco</button> }
+            @if (acesso.Altera) { <button class="btn btn-sm btn-outline-secondary" @onclick="BaixarModelo"><i class="bi bi-file-earmark-arrow-down"></i> Modelo</button> }
+            <button class="btn btn-sm btn-outline-secondary" @onclick="Exportar" disabled="@(!TemDados)"><i class="bi bi-file-earmark-excel"></i> Exportar</button>
+            @if (acesso.AtualizaDoBanco)
+            {
+                <button class="btn btn-sm btn-primary" @onclick="ImportarDoBanco" disabled="@(ocupado || string.IsNullOrWhiteSpace(sqlDre))">
+                    @if (ocupado) { <span class="spinner-border spinner-border-sm me-1"></span> <span>Consultando o banco...</span> }
+                    else { <i class="bi bi-arrow-repeat"></i> <span>Atualizar @ano do banco</span> }
+                </button>
+            }
+        </div>
+        @if (acesso.Altera)
+        {
+        <div class="small text-muted mb-2">
+            Planilha: <code>Competencia</code> (mm/aaaa) · <code>Grupo</code> · <code>Conta</code> · <code>Valor</code> (negativo = estorno dentro do grupo).
+            Grupos: @string.Join(", ", Enum.GetNames<GrupoDre>()).
+            A planilha substitui os meses que vierem no arquivo; o banco substitui o ano inteiro.
+        </div>
+        }
+        @if (mostrarSql && acesso.EditaSql)
+        {
+            <div class="border rounded p-2 mb-2">
+                <div class="small text-muted mb-1">
+                    SELECT que devolve <code>Competencia, Grupo, Conta, Valor</code>. Use <code>{inicio}</code> e <code>{fim}</code> para o período (o portal troca pelo ano escolhido).
+                    Somente leitura: roda dentro de transação desfeita e não altera nada no banco do cliente.
+                </div>
+                <textarea class="form-control sql mb-2" rows="10" @bind="sqlDre"></textarea>
+                <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => sqlDre = ModelosSql.DreBaseLv" title="Lê o resultado pronto da BASELV (gravado todo dia pelo SincronizadorLV), sem consultar as tabelas do ERP">Usar BASELV (recomendado)</button>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => sqlDre = ModelosSql.DreSqlServer">Usar modelo do ERP (SQL Server)</button>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="SalvarSql" disabled="@string.IsNullOrWhiteSpace(sqlDre)">Salvar SQL no cliente</button>
+                </div>
+            </div>
+        }
+        @if (erro is not null) { <div class="alert alert-danger small">@erro</div> }
+        @if (aviso is not null) { <div class="alert alert-success small">@aviso</div> }
+    </div>
+}
+
+@code {
+    private static readonly Dictionary<string, string> DicasDre = new()
+    {
+        [Dre.Nomes[GrupoDre.ReceitaBruta]] = "Total vendido: NF-e, NFC-e e vendas sem nota, só itens de venda (CFOP 5102/5405/6102...).",
+        [Dre.Devolucoes] = "Mercadorias devolvidas pelos clientes (CFOP de devolução de venda).",
+        [Dre.VendaLiquida] = "Receita bruta menos as devoluções: é a \"Venda\" da tela de indicadores do ERP.",
+        [Dre.ImpostosVenda] = "Impostos sobre a venda pagos: ICMS, PIS, COFINS, ISS, Simples (e demais deduções que não são devolução).",
+        ["= Receita líquida"] = "Receita bruta menos deduções: o que realmente fica da venda.",
+        [Dre.Nomes[GrupoDre.Cmv]] = "Custo das mercadorias vendidas: quantidade vendida × custo médio de reposição.",
+        ["= Lucro bruto"] = "Receita líquida menos o custo das mercadorias.",
+        [Dre.Nomes[GrupoDre.DespesasOperacionais]] = "Contas a pagar por centro de custo: pessoal, aluguel, administrativas, veículos, pró-labore.",
+        ["= Resultado operacional"] = "Lucro bruto menos as despesas para manter a operação.",
+        [Dre.Nomes[GrupoDre.ReceitasFinanceiras]] = "Rendimentos e juros recebidos.",
+        [Dre.Nomes[GrupoDre.DespesasFinanceiras]] = "Juros de empréstimos, tarifas bancárias e IOF.",
+        ["= Resultado antes do IR"] = "Resultado operacional mais receitas e menos despesas financeiras.",
+        [Dre.Nomes[GrupoDre.ImpostosSobreLucro]] = "Imposto de renda e contribuição social sobre o lucro.",
+        ["= Lucro líquido"] = "Resultado final: o que sobrou depois de tudo."
+    };
+
+    private static readonly string[] Meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+    private List<Cliente> clientes = [];
+    private int clienteId;
+    private int ano = DateTime.Today.Year;
+    private List<LancamentoDre> lancamentos = [];
+    private List<LinhaDre>? linhas;
+    private bool mostrarSql, ocupado, desenharGrafico;
+    private string? sqlDre, erro, aviso;
+
+    private PontoEquilibrioDre? pe;
+    private List<DateOnly> mesesDisponiveis = [];
+    private HashSet<DateOnly> mesesPe = [];
+    private int sqlClienteId;
+    private Acesso acesso = Acesso.Nenhum;
+
+    private bool TemDados => lancamentos.Count > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        acesso = await Acessos.ObterAsync();
+        await using var db = await Fabrica.CreateDbContextAsync();
+        clientes = await acesso.Filtrar(db.Clientes).AsNoTracking().Where(c => c.Ativo).OrderBy(c => c.Nome).ToListAsync();
+        ClienteAtual.Mudou += AoMudarCliente;
+        clienteId = acesso.EhCliente ? acesso.ClienteId!.Value : ClienteAtual.ClienteId;
+        if (clienteId > 0) await AoTrocarCliente();
+    }
+
+    private Task AoMudarCliente() => InvokeAsync(async () =>
+    {
+        if (acesso.EhCliente) return;
+        clienteId = ClienteAtual.ClienteId;
+        erro = aviso = null;
+        mostrarSql = false;
+        if (clienteId > 0) await AoTrocarCliente(); else { lancamentos = []; linhas = null; }
+        StateHasChanged();
+    });
+
+    public void Dispose() => ClienteAtual.Mudou -= AoMudarCliente;
+
+    /// <summary>Ao escolher a empresa, abre no ano mais recente que tem lançamentos.</summary>
+    private async Task AoTrocarCliente()
+    {
+        await using var db = await Fabrica.CreateDbContextAsync();
+        if (acesso.PodeVerCliente(clienteId)
+            && await db.LancamentosDre.Where(l => l.ClienteId == clienteId).MaxAsync(l => (DateOnly?)l.Competencia) is DateOnly ultimo)
+            ano = ultimo.Year;
+        await Carregar();
+    }
+
+    private async Task Carregar()
+    {
+        if (!acesso.PodeVerCliente(clienteId)) { clienteId = 0; lancamentos = []; linhas = null; return; }
+        await using var db = await Fabrica.CreateDbContextAsync();
+        var inicio = new DateOnly(ano, 1, 1);
+        var fim = new DateOnly(ano, 12, 1);
+        lancamentos = await db.LancamentosDre.AsNoTracking()
+            .Where(l => l.ClienteId == clienteId && l.Competencia >= inicio && l.Competencia <= fim)
+            .ToListAsync();
+        linhas = Dre.Montar(lancamentos);
+        mesesDisponiveis = Dre.MesesComMovimento(lancamentos);
+        mesesPe = Dre.MesesSugeridosPe(lancamentos).ToHashSet();
+        pe = Dre.PontoEquilibrio(lancamentos, mesesPe);
+        desenharGrafico = TemDados;
+        if (acesso.AtualizaDoBanco && sqlClienteId != clienteId)
+        {
+            sqlDre = (await db.Clientes.AsNoTracking().FirstOrDefaultAsync(c => c.Id == clienteId))?.SqlDre;
+            sqlClienteId = clienteId;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!desenharGrafico || linhas is null) return;
+        desenharGrafico = false;
+        var receita = linhas[0].Meses;
+        var lucro = linhas[^1].Meses;
+        await JS.InvokeVoidAsync("portal.grafico", "graficoDre", Meses, new object[]
+        {
+            new { label = "Receita bruta", data = receita, tipo = "bar", cor = "--grafico-1" },
+            new { label = "Lucro líquido", data = lucro, tipo = "line", cor = "--grafico-2" }
+        });
+    }
+
+    private async Task Importar(InputFileChangeEventArgs e)
+    {
+        if (!acesso.Altera) return;
+        erro = aviso = null;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(20 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+            var linhasArquivo = Planilhas.Ler(ms, e.File.Name);
+            await Gravar(linhasArquivo.Select(l => (l.Campo("competencia", "mes", "data"), l.Campo("grupo"), l.Campo("conta", "descricao", "historico"), l.Campo("valor"))));
+            await DataDosDados.RegistrarAsync(Fabrica, clienteId, DataDosDados.Dre, dadosDe: null); // planilha: data dos dados desconhecida
+        }
+        catch (Exception ex) { erro = $"Não foi possível importar: {ex.Message}"; }
+    }
+
+    private async Task ImportarDoBanco()
+    {
+        if (string.IsNullOrWhiteSpace(sqlDre) || !acesso.AtualizaDoBanco || !acesso.PodeVerCliente(clienteId)) return;
+        erro = aviso = null;
+        ocupado = true;
+        try
+        {
+            await using var db = await Fabrica.CreateDbContextAsync();
+            var cliente = await db.Clientes.FindAsync(clienteId) ?? throw new InvalidOperationException("Cliente não encontrado.");
+            // Quem não edita SQL usa sempre o que está salvo no cadastro (nada vindo da tela)
+            if (!acesso.EditaSql) sqlDre = cliente.SqlDre ?? "";
+            var sql = ModelosSql.AplicarPeriodo(sqlDre, new DateOnly(ano, 1, 1), new DateOnly(ano + 1, 1, 1));
+            var tabela = await Bancos.ConsultarAsync(cliente, sql);
+            await Gravar(ImportacaoDados.LinhasDre(tabela), anoInteiro: ano);
+            await DataDosDados.RegistrarAsync(Fabrica, clienteId, DataDosDados.Dre, await DataDosDados.ObterAsync(Bancos, cliente, sqlDre, DataDosDados.Dre));
+        }
+        catch (Exception ex) { erro = ex.Message; }
+        finally { ocupado = false; }
+    }
+
+    private async Task Gravar(IEnumerable<(string Competencia, string Grupo, string Conta, string Valor)> origem, int? anoInteiro = null)
+    {
+        if (!acesso.Altera || !acesso.PodeVerCliente(clienteId)) return;
+        var novos = ImportacaoDados.Lancamentos(origem, clienteId, out var rejeitadas);
+        var meses = novos.Select(n => n.Competencia).Distinct().ToList();
+        await ImportacaoDados.GravarDreAsync(Fabrica, clienteId, novos, anoInteiro);
+
+        if (novos.Count > 0 && novos.All(n => n.Competencia.Year != ano)) ano = novos[0].Competencia.Year;
+        await Carregar();
+        aviso = $"{novos.Count} lançamento(s) importado(s) em {meses.Count} mês(es)." + (rejeitadas > 0 ? $" {rejeitadas} linha(s) ignorada(s) por competência ou grupo inválido." : "");
+    }
+
+    private void AlternarMes(DateOnly mes)
+    {
+        if (!mesesPe.Remove(mes)) mesesPe.Add(mes);
+        pe = Dre.PontoEquilibrio(lancamentos, mesesPe);
+    }
+
+    private async Task SalvarSql()
+    {
+        if (!acesso.EditaSql) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        await db.Clientes.Where(c => c.Id == clienteId).ExecuteUpdateAsync(u => u.SetProperty(c => c.SqlDre, sqlDre));
+        erro = null;
+        aviso = "SQL da DRE salvo no cadastro do cliente.";
+    }
+
+    private async Task UsarNaPrecificacao()
+    {
+        if (pe is null || !acesso.Altera || !acesso.PodeVerCliente(clienteId)) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        await db.Clientes.Where(c => c.Id == clienteId).ExecuteUpdateAsync(u => u
+            .SetProperty(c => c.CustosFixosMensais, Math.Round(pe.CustosFixosMedios, 2))
+            .SetProperty(c => c.FaturamentoMedioMensal, Math.Round(pe.FaturamentoMedio, 2))
+            .SetProperty(c => c.ImpostosPct, Math.Round(pe.DeducoesPct * 100, 2)));
+        erro = null;
+        aviso = $"Precificação atualizada: custos fixos {pe.CustosFixosMedios:C0}/mês, faturamento {pe.FaturamentoMedio:C0}/mês, deduções {pe.DeducoesPct:P1} (impostos + devoluções).";
+    }
+
+    private async Task BaixarModelo()
+    {
+        var bytes = Planilhas.GerarXlsx("Lancamentos", ["Competencia", "Grupo", "Conta", "Valor"],
+        [
+            [$"01/{ano}", "ReceitaBruta", "Vendas de mercadorias", 100000m],
+            [$"01/{ano}", "Deducoes", "Simples Nacional", 8000m],
+            [$"01/{ano}", "Cmv", "Custo das mercadorias vendidas", 55000m],
+            [$"01/{ano}", "DespesasOperacionais", "Folha de pagamento", 15000m],
+            [$"01/{ano}", "DespesasOperacionais", "Aluguel", 5000m],
+            [$"01/{ano}", "DespesasFinanceiras", "Tarifas e juros", 1200m]
+        ]);
+        await JS.InvokeVoidAsync("portal.baixarArquivo", "modelo-dre.xlsx", Convert.ToBase64String(bytes),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    }
+
+    private async Task Exportar()
+    {
+        if (linhas is null) return;
+        var nome = clientes.FirstOrDefault(c => c.Id == clienteId)?.Nome ?? "cliente";
+        var bytes = Planilhas.GerarXlsx($"DRE {ano}", ["Linha", .. Meses, "Total"],
+            linhas.Select(l => (IReadOnlyList<object?>)[l.Titulo, .. l.Meses.Cast<object?>(), l.Ano]));
+        await JS.InvokeVoidAsync("portal.baixarArquivo", $"dre-{nome}-{ano}.xlsx", Convert.ToBase64String(bytes),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    }
+}
