@@ -1,0 +1,206 @@
+@page "/configuracoes"
+@attribute [Authorize(Roles = Perfis.Administrador)]
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject ConfiguracaoMensagensStore Configuracao
+@inject MensagemService Mensageiro
+@inject AuthenticationStateProvider Autenticacao
+
+<PageTitle>Configurações · Vogel</PageTitle>
+
+<div class="cabecalho-pagina">
+    <h1>Configurações</h1>
+    @if (Configuracao.AtualizadoEm is DateTime quando)
+    {
+        <span class="small text-muted">Última alteração: @quando.ToString("dd/MM/yyyy HH:mm") por @Configuracao.AtualizadoPor</span>
+    }
+</div>
+
+<div class="cartao">
+    <h2 class="h5">Mensagens de WhatsApp (Pagebot)</h2>
+
+    <div class="row g-3">
+        <div class="col-md-4">
+            <label class="form-label"><span class="dica" title="Manual: o botão só abre o WhatsApp com o texto pronto e uma pessoa envia. Pagebot: envia direto pela API (e permite o envio automático das rotinas).">Modo de envio</span></label>
+            <select class="form-select" @bind="dados.Modo">
+                <option value="Manual">Manual (link do WhatsApp)</option>
+                <option value="Pagebot">Pagebot (envio pela API)</option>
+            </select>
+        </div>
+        <div class="col-md-8">
+            <label class="form-label"><span class="dica" title="Token do canal de WhatsApp, fica nas configurações do canal na plataforma Pagebot. É gravado criptografado e nunca é exibido de novo.">Token do canal Pagebot</span></label>
+            <input type="password" class="form-control" autocomplete="new-password" @bind="novoToken"
+                   placeholder="@(TemToken ? "•••••••• configurado — deixe em branco para manter" : "Cole aqui o token do canal")" />
+            <div class="form-text">
+                @if (TemToken)
+                {
+                    <span class="positivo"><i class="bi bi-check-circle"></i> Token configurado (@Configuracao.OrigemToken).</span>
+                    @if (Configuracao.OrigemToken == "tela")
+                    {
+                        <button class="btn btn-link btn-sm p-0 ms-2 negativo" @onclick="RemoverToken">remover token</button>
+                    }
+                }
+                else
+                {
+                    <span>Nenhum token configurado: nada é enviado pelo Pagebot.</span>
+                }
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="form-check form-switch mt-md-4">
+                <input class="form-check-input" type="checkbox" id="modoTeste" @bind="dados.ModoTeste" />
+                <label class="form-check-label" for="modoTeste">
+                    <span class="dica" title="Ligado: TODA mensagem vai para o número de teste, com '[TESTE → cliente]' no início. Os clientes não recebem nada.">Modo teste</span>
+                </label>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label"><span class="dica" title="Número que recebe as mensagens no modo teste (55 + DDD + número).">Número de teste</span></label>
+            <input class="form-control" @bind="dados.NumeroTeste" placeholder="5551999999999" />
+        </div>
+        <div class="col-md-4">
+            <button class="btn btn-whatsapp w-100 mt-md-4" @onclick="EnviarTeste" disabled="@enviandoTeste">
+                @if (enviandoTeste) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                <i class="bi bi-whatsapp"></i> Enviar 1 mensagem de teste
+            </button>
+            <div class="form-check small mt-1 @(dados.ForceSend ? "d-none" : "")">
+                <input class="form-check-input" type="checkbox" id="forcar" @bind="forcarTeste" />
+                <label class="form-check-label" for="forcar">
+                    <span class="dica" title="Só para este teste (vai para o número de teste): envia mesmo que exista um atendimento aberto com o número no Pagebot. As mensagens para clientes continuam sem forçar.">Forçar mesmo com atendimento aberto</span>
+                </label>
+            </div>
+        </div>
+        <div class="col-12">
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="forceSend" @bind="dados.ForceSend" />
+                <label class="form-check-label" for="forceSend">
+                    <span class="dica" title="Ligado: o Pagebot envia mesmo que já exista um atendimento aberto com o número (a mensagem entra na conversa em andamento). Desligado: o Pagebot recusa e o portal tenta de novo em 2 h.">Enviar mesmo com atendimento aberto no Pagebot (forceSend)</span>
+                </label>
+            </div>
+        </div>
+        @if (!dados.ModoTeste)
+        {
+            <div class="col-12">
+                <div class="alert alert-danger small m-0">
+                    <strong>Modo teste desligado:</strong> as mensagens automáticas vão para o WhatsApp real dos clientes.
+                </div>
+            </div>
+        }
+
+        <div class="col-12"><h3 class="h6 mt-2 mb-0">Proteções do número</h3></div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small"><span class="dica" title="Máximo de envios pelo Pagebot por dia, somando todos os clientes.">Limite por dia</span></label>
+            <input type="number" min="0" class="form-control" @bind="dados.LimiteDiario" />
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small"><span class="dica" title="Mensagens automáticas por cliente por dia. Vários alertas do mesmo cliente vão juntos numa só.">Por cliente / dia</span></label>
+            <input type="number" min="0" class="form-control" @bind="dados.LimitePorClienteDia" />
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small"><span class="dica" title="Espera mínima entre dois envios automáticos.">Intervalo (seg.)</span></label>
+            <input type="number" min="0" class="form-control" @bind="dados.IntervaloSegundos" />
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small"><span class="dica" title="Quantas vezes tentar se o Pagebot der erro, antes de desistir daquele alerta.">Tentativas</span></label>
+            <input type="number" min="1" max="10" class="form-control" @bind="dados.TentativasMaximas" />
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small"><span class="dica" title="Hora em que os envios automáticos começam (0 a 23).">Horário início</span></label>
+            <input type="number" min="0" max="23" class="form-control" @bind="dados.HorarioInicio" />
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small"><span class="dica" title="Hora em que os envios automáticos param (não envia a partir desta hora).">Horário fim</span></label>
+            <input type="number" min="1" max="24" class="form-control" @bind="dados.HorarioFim" />
+        </div>
+        <div class="col-12 d-flex gap-4">
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="sab" @bind="dados.EnviarSabado" /><label class="form-check-label" for="sab">Enviar aos sábados</label></div>
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="dom" @bind="dados.EnviarDomingo" /><label class="form-check-label" for="dom">Enviar aos domingos</label></div>
+        </div>
+
+        <div class="col-12">
+            <details>
+                <summary class="small text-muted">Avançado</summary>
+                <label class="form-label small mt-2">Endereço da API (send-text)</label>
+                <input class="form-control sql" @bind="dados.PagebotUrl" />
+                <div class="form-text">Padrão: https://api.pagebot.com.br/core/v2/api/chats/send-text</div>
+            </details>
+        </div>
+
+        <div class="col-12 d-flex gap-2 align-items-center">
+            <button class="btn btn-primary" @onclick="Salvar"><i class="bi bi-save"></i> Salvar</button>
+            @if (aviso is not null) { <span class="small positivo">@aviso</span> }
+            @if (erro is not null) { <span class="small negativo">@erro</span> }
+        </div>
+    </div>
+</div>
+
+@code {
+    private ConfiguracaoMensagens dados = new();
+    private string? novoToken, aviso, erro;
+    private bool enviandoTeste, forcarTeste;
+
+    private bool TemToken => !string.IsNullOrWhiteSpace(Configuracao.Atual.Pagebot.Token);
+
+    protected override void OnInitialized() => CarregarTela();
+
+    private void CarregarTela()
+    {
+        var o = Configuracao.Atual;
+        dados = new ConfiguracaoMensagens
+        {
+            Modo = o.Modo.Equals("Pagebot", StringComparison.OrdinalIgnoreCase) ? "Pagebot" : "Manual",
+            ModoTeste = o.ModoTeste,
+            NumeroTeste = o.NumeroTeste,
+            HorarioInicio = o.HorarioInicio,
+            HorarioFim = o.HorarioFim,
+            EnviarSabado = o.EnviarSabado,
+            EnviarDomingo = o.EnviarDomingo,
+            LimiteDiario = o.LimiteDiario,
+            LimitePorClienteDia = o.LimitePorClienteDia,
+            IntervaloSegundos = o.IntervaloSegundos,
+            TentativasMaximas = o.TentativasMaximas,
+            ForceSend = o.ForceSend,
+            PagebotUrl = o.Pagebot.Url
+        };
+    }
+
+    private async Task<string?> Usuario() => (await Autenticacao.GetAuthenticationStateAsync()).User.Identity?.Name;
+
+    private async Task Salvar()
+    {
+        aviso = erro = null;
+        if (dados.ModoTeste && MensagemService.SomenteDigitos(dados.NumeroTeste).Length < 10)
+        {
+            erro = "Com o modo teste ligado, informe o número de teste (55 + DDD + número).";
+            return;
+        }
+        if (dados.HorarioFim <= dados.HorarioInicio)
+        {
+            erro = "O horário fim precisa ser maior que o início.";
+            return;
+        }
+        await Configuracao.SalvarAsync(Fabrica, dados, novoToken, await Usuario());
+        novoToken = null;
+        CarregarTela();
+        aviso = "Configurações salvas. Já estão valendo.";
+    }
+
+    private async Task RemoverToken()
+    {
+        await Configuracao.RemoverTokenAsync(Fabrica);
+        aviso = "Token removido.";
+    }
+
+    private async Task EnviarTeste()
+    {
+        aviso = erro = null;
+        enviandoTeste = true;
+        try
+        {
+            var r = await Mensageiro.EnviarTesteAsync(await Usuario(), forcarTeste);
+            if (r.Sucesso) aviso = $"Mensagem de teste enviada para {Mensageiro.NumeroTeste}. Confira no WhatsApp. (Pagebot: {r.Retorno})";
+            else erro = $"Não enviou: {MensagemService.ExplicarRetorno(r.Retorno)}";
+        }
+        finally { enviandoTeste = false; }
+    }
+}

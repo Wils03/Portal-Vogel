@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SincronizadorLV</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.CommandLine" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="agendar-tarefa.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <!-- SQLs padrão = os mesmos modelos do portal. No servidor do cliente, troque pelos SQLs salvos no cadastro dele. -->
+    <None Include="..\Dashborad\Services\ModeloDreSqlServer.sql" Link="consultas\dre.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Dashborad\Services\ModeloPrecificacaoSqlServer.sql" Link="consultas\precificacao.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Dashborad\Services\ModeloComercialSqlServer.sql" Link="consultas\comercial.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Dashborad\Services\ModeloFeriadosSqlServer.sql" Link="consultas\feriados.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Dashborad\Services\ModeloCotasSqlServer.sql" Link="consultas\cotas.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

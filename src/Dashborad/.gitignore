@@ -1,0 +1,5 @@
+bin/
+obj/
+Data/app.db*
+Data/keys/
+appsettings.*.local.json

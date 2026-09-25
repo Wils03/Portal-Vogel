@@ -1,0 +1,405 @@
+@page "/comercial"
+@attribute [Authorize(Roles = Perfis.Gestao)]
+@implements IDisposable
+@inject ClienteAtualService ClienteAtual
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject BancoClienteService Bancos
+@inject AcessoService Acessos
+
+<PageTitle>Comercial · Vogel</PageTitle>
+
+<div class="cabecalho-pagina">
+    <h1>Metas por vendedor@(empresa is not null ? $" · {empresa.Nome}" : "")</h1>
+    @if (empresa is not null)
+    {
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <label class="small text-muted m-0" for="dataFinal">Data final</label>
+            <input id="dataFinal" type="date" class="form-control w-auto" value="@dataFinal.ToString("yyyy-MM-dd")" @onchange="TrocarData" />
+        </div>
+    }
+</div>
+
+@if (empresa is null)
+{
+    <div class="cartao text-muted">@(acesso.EhVogel ? "Escolha o cliente no topo da tela para ver o Comercial." : "Seu usuário não está ligado a uma empresa ativa. Fale com a Vogel.")</div>
+}
+else
+{
+    @if (erro is not null) { <div class="alert alert-danger">@erro</div> }
+    @if (aviso is not null) { <div class="alert alert-success">@aviso</div> }
+
+    @if (relatorio is { } r)
+    {
+        var t = r.Total;
+        <div class="small text-muted mb-2 d-flex flex-wrap gap-3 align-items-center">
+            <span>Data final: <strong>@r.DataFinal.ToString("dd/MM/yyyy")</strong></span>
+            <span class="dica" title="Como o ERP (fDiasUteis): segunda a sexta = 1, sábado = ½, menos os feriados do ERP (@r.FeriadosNoMes no mês); arredondado como no relatório (exato: @r.DiasUteisMesExato.ToString("0.#")). O gestor pode ajustar os dias úteis do mês.">
+                Dias úteis acumulado: <strong>@r.DiasUteisAcumulado</strong> / Dias úteis mês:
+                @if (acesso.Altera)
+                {
+                    <input class="form-control form-control-sm d-inline-block text-end" style="width: 4.5rem" type="number" min="1" max="31"
+                           value="@(diasUteisEditado ?? r.DiasUteisMes)" @onchange="AlterarDiasUteis" />
+                }
+                else { <strong>@r.DiasUteisMes</strong> }
+                @if (r.DiasUteisMes != r.DiasUteisCalculados) { <span> (ajustado; calculado: @r.DiasUteisCalculados)</span> }
+                else if (r.DiasUteisMesExato != r.DiasUteisMes) { <span> (@r.DiasUteisMesExato.ToString("0.#") com sábado = ½)</span> }
+            </span>
+            <span class="dica" title="CMV = quantidade × &quot;Custo total&quot; do item, como no relatório de metas do ERP.">Custo: Custo Total</span>
+        </div>
+
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-xl-3">
+                <div class="cartao kpi">
+                    <div class="rotulo">Venda líquida acumulada · @NomeMes(r.DataFinal)</div>
+                    <div class="valor">@t.Acumulado.Venda.ToString("C0")</div>
+                    @if (t.Crescimento is decimal cr) { <div class="detalhe"><span class="@(cr >= 0 ? "positivo" : "negativo")">@(cr >= 0 ? "▲" : "▼") @cr.ToString("+0.0%;-0.0%")</span> vs mesmo período do ano anterior</div> }
+                </div>
+            </div>
+            <div class="col-6 col-xl-3">
+                <div class="cartao kpi">
+                    <div class="rotulo"><span class="dica" title="Venda acumulada ÷ meta do mês inteiro.">Meta geral do mês</span></div>
+                    @if (t.MetaMes is decimal mm && t.AtingimentoGeral is decimal ag)
+                    {
+                        <div class="valor @(ag >= 1 ? "positivo" : "")">@ag.ToString("P1")</div>
+                        @Barra(ag)
+                        <div class="detalhe">Meta @mm.ToString("C0") · @Diferenca(t.Diferenca)</div>
+                        @if (t.DiferencaAcumulada is decimal da) { <div class="detalhe">No ritmo da meta até a data: <span class="@(da >= 0 ? "positivo" : "negativo")">@(da >= 0 ? "adiantado" : "atrasado") @Math.Abs(da).ToString("C0")</span></div> }
+                    }
+                    else
+                    {
+                        <div class="valor text-muted">—</div>
+                        <div class="detalhe">Sem metas (cotas) no ERP para @NomeMes(r.DataFinal).@(acesso.Altera ? " Cadastre no ERP ou preencha na coluna Meta geral." : "")</div>
+                    }
+                </div>
+            </div>
+            <div class="col-6 col-xl-3">
+                <div class="cartao kpi">
+                    <div class="rotulo">Número de vendas (acumulado)</div>
+                    <div class="valor">@t.Acumulado.Documentos.ToString("N0")</div>
+                    <div class="detalhe">Ticket médio @(t.Acumulado.TicketMedio?.ToString("C2") ?? "—") · @(t.Acumulado.ItensPorVenda?.ToString("N2") ?? "—") itens/venda</div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-3">
+                <div class="cartao kpi">
+                    <div class="rotulo"><span class="dica" title="(Venda − CMV) ÷ venda, com o CMV pelo Custo Total.">Margem de contribuição</span></div>
+                    <div class="valor">@(t.Acumulado.MargemPct?.ToString("P2") ?? "—")</div>
+                    <div class="detalhe">CMV @t.Acumulado.Cmv.ToString("C0")</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="cartao">
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                <h2 class="h5 m-0 me-auto">Vendedores</h2>
+                <div class="form-check m-0"><input class="form-check-input" type="checkbox" id="porGerente" @bind="porGerente" /><label class="form-check-label small" for="porGerente">Agrupar por gerente</label></div>
+                @if (comCotaErp > 0)
+                {
+                    <span class="small text-muted dica" title="Como o relatório Metas do ERP: só as estruturas de venda com cota no mês (Cotas de Vendas). As demais não fazem parte das vendas; totais e cartões somam só estas.">@comCotaErp com meta no ERP</span>
+                }
+                @if (acesso.Altera)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="CopiarMetasMesAnterior" title="Preenche as metas vazias com as do mês anterior">Copiar metas do mês anterior</button>
+                    <button class="btn btn-sm btn-primary" @onclick="SalvarMetas" disabled="@(!alterado)"><i class="bi bi-check2"></i> Salvar metas</button>
+                }
+            </div>
+            <div class="table-wrap">
+                <table class="table table-sm align-middle m-0 tabela-metas">
+                    <thead>
+                        <tr class="grupos">
+                            <th></th>
+                            <th colspan="6" class="text-center">Diário · @r.DataFinal.ToString("dd/MM")</th>
+                            <th colspan="6" class="text-center">Acumulado</th>
+                            <th colspan="3" class="text-center">Acumulado ano anterior</th>
+                            <th colspan="3" class="text-center">Meta geral</th>
+                        </tr>
+                        <tr>
+                            <th>Vendedor</th>
+                            <th class="num">Venda líq.</th><th class="num">Meta</th><th class="num">Ating.</th><th class="num">CMV</th><th class="num">Margem</th><th class="num">Ticket</th>
+                            <th class="num">Venda líq.</th><th class="num">Meta</th><th class="num">Ating.</th><th class="num">CMV</th><th class="num">Margem</th><th class="num">Ticket</th>
+                            <th class="num">Venda líq.</th><th class="num">Margem</th><th class="num">Cresc.</th>
+                            <th class="num" style="min-width: 7.5rem">Meta</th><th class="num">Ating.</th><th class="num"><span class="dica" title="Acumulado − meta do mês: negativo = quanto falta; positivo = quanto passou.">Diferença</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (porGerente)
+                        {
+                            @foreach (var g in r.Grupos.Where(g => !g.Total.Zerada))
+                            {
+                                @Linha(g.Total, total: true, editavel: false)
+                                @foreach (var v in Visiveis(g.Vendedores)) { @Linha(v, total: false, editavel: acesso.Altera) }
+                            }
+                        }
+                        else
+                        {
+                            @foreach (var v in Visiveis(r.Vendedores).OrderBy(v => v.Nome)) { @Linha(v, total: false, editavel: acesso.Altera) }
+                        }
+                        @Linha(t, total: true, editavel: false)
+                    </tbody>
+                </table>
+            </div>
+            <div class="small text-muted mt-2">
+                Metas = cotas cadastradas no ERP (Cotas de Vendas); sem cota no ERP, vale a meta digitada aqui. Meta do dia = meta do mês ÷ dias úteis do mês;
+                meta acumulada = meta do mês × dias úteis até a data ÷ dias úteis do mês. Sem vendas em permuta, como o relatório "Metas" do ERP.
+                Vendedor = estrutura de venda do documento (gerente = estrutura "pai"). Dados direto das tabelas do ERP, sem views.
+            </div>
+        </div>
+    }
+
+    @if (acesso.AtualizaDoBanco)
+    {
+        <div class="cartao">
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                <span class="small text-muted me-auto">
+                    Dados de @(DataDosDados.Referencia(empresa.ComercialDadosDe, empresa.ComercialAtualizadoEm)?.ToString("dd/MM/yyyy HH:mm") ?? "—").
+                    Com a BASELV, o portal importa sozinho todo dia (ano atual e anterior).
+                </span>
+                @if (acesso.EditaSql) { <button class="btn btn-sm btn-outline-secondary" @onclick="() => mostrarSql = !mostrarSql"><i class="bi bi-database"></i> SQL do banco</button> }
+                <select class="form-select form-select-sm w-auto" @bind="anoImportacao">
+                    @for (var a = DateTime.Today.Year; a >= DateTime.Today.Year - 3; a--) { <option value="@a">@a</option> }
+                </select>
+                <button class="btn btn-sm btn-primary" @onclick="ImportarDoBanco" disabled="@(ocupado || string.IsNullOrWhiteSpace(sqlComercial))">
+                    @if (ocupado) { <span class="spinner-border spinner-border-sm me-1"></span> <span>Consultando o banco...</span> }
+                    else { <i class="bi bi-arrow-repeat"></i> <span>Atualizar @anoImportacao do banco</span> }
+                </button>
+            </div>
+            @if (mostrarSql && acesso.EditaSql)
+            {
+                <div class="border rounded p-2 mt-2">
+                    <div class="small text-muted mb-1">
+                        SELECT que devolve <code>Data, Vendedor, NomeVendedor, Gerente, NomeGerente, VendaBruta, Devolucoes, Cmv, Documentos, Itens</code> (um registro por dia e vendedor).
+                        Use <code>{inicio}</code> e <code>{fim}</code>. Somente leitura: roda em transação desfeita.
+                    </div>
+                    <textarea class="form-control sql mb-2" rows="8" @bind="sqlComercial"></textarea>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => sqlComercial = ModelosSql.ComercialBaseLv">Usar BASELV (recomendado)</button>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => sqlComercial = ModelosSql.ComercialSqlServer">Usar modelo do ERP (SQL Server)</button>
+                        <button class="btn btn-sm btn-outline-primary" @onclick="SalvarSql" disabled="@string.IsNullOrWhiteSpace(sqlComercial)">Salvar SQL no cliente</button>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private Acesso acesso = Acesso.Nenhum;
+    private Cliente? empresa;
+    private DateOnly dataFinal = DateOnly.FromDateTime(DateTime.Today);
+    private RelatorioMetas? relatorio;
+    private List<MetaVendedor> metasMesAnterior = [];
+    private bool porGerente, mostrarSql, ocupado, alterado;
+
+    /// <summary>Estruturas com cota (&gt; 0) no ERP no mês. Havendo cotas, só elas aparecem (as demais não fazem parte das vendas).</summary>
+    private int comCotaErp;
+
+    /// <summary>Estruturas zeradas (sem venda nem meta) não aparecem.</summary>
+    private static IEnumerable<LinhaMetas> Visiveis(IEnumerable<LinhaMetas> linhas) => linhas.Where(v => !v.Zerada);
+    private string? sqlComercial, erro, aviso;
+    private int anoImportacao = DateTime.Today.Year;
+
+    // Edição na tela (salva com "Salvar metas")
+    private Dictionary<string, decimal?> metasEditadas = [];
+    private int? diasUteisEditado;
+
+    /// <summary>Vendedores cuja meta do mês é a cota do ERP (não se edita aqui).</summary>
+    private HashSet<string> metasDoErp = [];
+
+    private DateOnly Mes => new(dataFinal.Year, dataFinal.Month, 1);
+
+    private static string NomeMes(DateOnly m) => new DateTime(m.Year, m.Month, 1).ToString("MMM/yy");
+
+    protected override async Task OnInitializedAsync()
+    {
+        acesso = await Acessos.ObterAsync();
+        ClienteAtual.Mudou += AoMudarCliente;
+        await AbrirEmpresa();
+    }
+
+    private Task AoMudarCliente() => InvokeAsync(async () => { erro = aviso = null; await AbrirEmpresa(); StateHasChanged(); });
+
+    public void Dispose() => ClienteAtual.Mudou -= AoMudarCliente;
+
+    /// <summary>Ao escolher a empresa, abre na última data com venda.</summary>
+    private async Task AbrirEmpresa()
+    {
+        empresa = null;
+        relatorio = null;
+        var id = acesso.EhCliente ? acesso.ClienteId : ClienteAtual.Filtro;
+        if (id is not int clienteId || !acesso.VeComercial) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        empresa = await acesso.Filtrar(db.Clientes).AsNoTracking().FirstOrDefaultAsync(c => c.Id == clienteId);
+        if (empresa is null) return;
+        sqlComercial = acesso.AtualizaDoBanco ? empresa.SqlComercial : null;
+        var hoje = DateOnly.FromDateTime(DateTime.Today);
+        dataFinal = await db.VendasVendedores.Where(v => v.ClienteId == clienteId && v.Data <= hoje).MaxAsync(v => (DateOnly?)v.Data) ?? hoje;
+        await Carregar();
+    }
+
+    private async Task Carregar()
+    {
+        if (empresa is null) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        var inicioAnt = Mes.AddYears(-1);
+        var vendas = await db.VendasVendedores.AsNoTracking()
+            .Where(v => v.ClienteId == empresa.Id && v.Data >= inicioAnt && v.Data <= dataFinal).ToListAsync();
+        var metas = await db.MetasVendedores.AsNoTracking().Where(m => m.ClienteId == empresa.Id && m.Competencia == Mes).ToListAsync();
+        metasMesAnterior = await db.MetasVendedores.AsNoTracking().Where(m => m.ClienteId == empresa.Id && m.Competencia == Mes.AddMonths(-1)).ToListAsync();
+        var feriados = (await db.Feriados.AsNoTracking().Where(f => f.ClienteId == empresa.Id).Select(f => f.Data).ToListAsync()).ToHashSet();
+        var ajuste = await db.DiasUteis.AsNoTracking().Where(d => d.ClienteId == empresa.Id && d.Competencia == Mes).Select(d => (int?)d.DiasUteis).FirstOrDefaultAsync();
+
+        var comCota = metas.Where(m => m.DoErp && m.Meta > 0).Select(m => m.Vendedor).ToHashSet();
+        comCotaErp = comCota.Count;
+        relatorio = ComercialResumo.Montar(dataFinal, vendas, metas, feriados, ajuste, comCota.Count > 0 ? comCota : null);
+        metasDoErp = metas.Where(m => m.DoErp).Select(m => m.Vendedor).ToHashSet();
+        metasEditadas = relatorio.Vendedores.Where(v => !metasDoErp.Contains(v.Vendedor)).ToDictionary(v => v.Vendedor, v => v.MetaMes);
+        diasUteisEditado = ajuste;
+        alterado = false;
+    }
+
+    private async Task TrocarData(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParse(e.Value?.ToString(), out var d)) { dataFinal = d; erro = aviso = null; await Carregar(); }
+    }
+
+    private RenderFragment Barra(decimal pct) => __builder =>
+    {
+        <div class="progress my-1" role="progressbar" aria-valuenow="@((int)Math.Min(pct * 100, 100))" aria-valuemin="0" aria-valuemax="100" style="height: .5rem">
+            <div class="progress-bar @(pct >= 1 ? "bg-success" : "")" style="width: @(Math.Min(pct * 100, 100).ToString("0", System.Globalization.CultureInfo.InvariantCulture))%"></div>
+        </div>
+    };
+
+    private static RenderFragment Diferenca(decimal? dif) => __builder =>
+    {
+        if (dif is decimal d)
+        {
+            <span class="@(d >= 0 ? "positivo" : "negativo")">@(d >= 0 ? $"passou {d:C0}" : $"faltam {Math.Abs(d):C0}")</span>
+        }
+    };
+
+    private static string Pct(decimal? v) => v?.ToString("P2") ?? "";
+    private static string Valor(decimal v) => v == 0 ? "0,00" : v.ToString("N2");
+
+    private RenderFragment Linha(LinhaMetas v, bool total, bool editavel) => __builder =>
+    {
+        <tr class="@(total ? "total" : "")">
+            <td class="text-nowrap @(total ? "" : "ps-2")">@v.Nome</td>
+            <td class="num">@Valor(v.Dia.Venda)</td>
+            <td class="num">@(v.MetaDia?.ToString("N0") ?? "")</td>
+            <td class="num @(v.AtingimentoDia >= 1 ? "positivo" : "")">@Pct(v.AtingimentoDia)</td>
+            <td class="num">@Valor(v.Dia.Cmv)</td>
+            <td class="num">@Pct(v.Dia.MargemPct)</td>
+            <td class="num">@(v.Dia.TicketMedio?.ToString("N2") ?? "0,00")</td>
+            <td class="num">@Valor(v.Acumulado.Venda)</td>
+            <td class="num">@(v.MetaAcumulada?.ToString("N0") ?? "")</td>
+            <td class="num @(v.AtingimentoAcumulado >= 1 ? "positivo" : "")">@Pct(v.AtingimentoAcumulado)</td>
+            <td class="num">@Valor(v.Acumulado.Cmv)</td>
+            <td class="num">@Pct(v.Acumulado.MargemPct)</td>
+            <td class="num">@(v.Acumulado.TicketMedio?.ToString("N2") ?? "0,00")</td>
+            <td class="num">@(v.AnoAnterior.Venda == 0 ? "" : v.AnoAnterior.Venda.ToString("N2"))</td>
+            <td class="num">@Pct(v.AnoAnterior.MargemPct)</td>
+            <td class="num @(v.Crescimento < 0 ? "negativo" : "")">@Pct(v.Crescimento)</td>
+            <td class="num">
+                @if (metasDoErp.Contains(v.Vendedor) && !total)
+                {
+                    <span title="Cota cadastrada no ERP (Cotas de Vendas)">@(v.MetaMes?.ToString("N0")) <span class="selo selo-Info ms-1">ERP</span></span>
+                }
+                else if (editavel)
+                {
+                    <input class="form-control form-control-sm text-end" type="number" min="0" step="1000" placeholder="—"
+                           value="@(metasEditadas.GetValueOrDefault(v.Vendedor)?.ToString("0", System.Globalization.CultureInfo.InvariantCulture))"
+                           @onchange="e => AlterarMeta(v.Vendedor, e.Value?.ToString())" />
+                }
+                else { @(v.MetaMes?.ToString("N0") ?? "") }
+            </td>
+            <td class="num @(v.AtingimentoGeral >= 1 ? "positivo" : "")">@Pct(v.AtingimentoGeral)</td>
+            <td class="num text-nowrap">
+                @if (v.Diferenca is decimal d) { <span class="@(d >= 0 ? "positivo" : "negativo")">@d.ToString("N2")</span> }
+            </td>
+        </tr>
+    };
+
+    private void AlterarMeta(string vendedor, string? texto)
+    {
+        metasEditadas[vendedor] = decimal.TryParse(texto, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0 ? v : null;
+        alterado = true;
+    }
+
+    private void AlterarDiasUteis(ChangeEventArgs e)
+    {
+        diasUteisEditado = int.TryParse(e.Value?.ToString(), out var d) && d is > 0 and <= 31 && d != relatorio?.DiasUteisCalculados ? d : null;
+        alterado = true;
+    }
+
+    private void CopiarMetasMesAnterior()
+    {
+        var copiadas = 0;
+        foreach (var m in metasMesAnterior)
+            if (metasEditadas.TryGetValue(m.Vendedor, out var atual) && atual is null)
+            {
+                metasEditadas[m.Vendedor] = m.Meta;
+                copiadas++;
+            }
+        alterado |= copiadas > 0;
+        aviso = copiadas > 0 ? $"{copiadas} meta(s) de {NomeMes(Mes.AddMonths(-1))} copiada(s) para vendedores sem meta. Confira e clique em Salvar metas." : $"Nada a copiar de {NomeMes(Mes.AddMonths(-1))}.";
+    }
+
+    private async Task SalvarMetas()
+    {
+        if (empresa is null || !acesso.Altera || !acesso.PodeVerCliente(empresa.Id)) return;
+        var mes = Mes;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        var existentes = await db.MetasVendedores.Where(m => m.ClienteId == empresa.Id && m.Competencia == mes).ToListAsync();
+        foreach (var (vendedor, valor) in metasEditadas)
+        {
+            var atual = existentes.FirstOrDefault(m => m.Vendedor == vendedor);
+            if (atual is { DoErp: true }) continue; // cota do ERP: não se altera pelo portal
+            if (valor is null) { if (atual is not null) db.MetasVendedores.Remove(atual); continue; }
+            if (atual is null) db.MetasVendedores.Add(atual = new MetaVendedor { ClienteId = empresa.Id, Competencia = mes, Vendedor = vendedor });
+            atual.Meta = valor.Value;
+            atual.AtualizadoEm = DateTime.Now;
+            atual.AtualizadoPor = acesso.Email;
+        }
+
+        var dias = await db.DiasUteis.FirstOrDefaultAsync(d => d.ClienteId == empresa.Id && d.Competencia == mes);
+        if (diasUteisEditado is int du)
+        {
+            if (dias is null) db.DiasUteis.Add(dias = new DiasUteisMes { ClienteId = empresa.Id, Competencia = mes });
+            dias.DiasUteis = du;
+        }
+        else if (dias is not null) db.DiasUteis.Remove(dias);
+
+        await db.SaveChangesAsync();
+        aviso = $"Metas de {NomeMes(mes)} salvas.";
+        erro = null;
+        await Carregar();
+    }
+
+    private async Task ImportarDoBanco()
+    {
+        if (empresa is null || string.IsNullOrWhiteSpace(sqlComercial) || !acesso.AtualizaDoBanco) return;
+        erro = aviso = null;
+        ocupado = true;
+        try
+        {
+            await using var db = await Fabrica.CreateDbContextAsync();
+            var cliente = await acesso.Filtrar(db.Clientes).AsNoTracking().FirstAsync(c => c.Id == empresa.Id);
+            // Quem não edita SQL usa sempre o que está salvo no cadastro (nada vindo da tela)
+            if (!acesso.EditaSql) sqlComercial = cliente.SqlComercial ?? "";
+            var linhas = await ImportacaoDados.ImportarComercialAsync(Fabrica, Bancos, cliente, sqlComercial, anoImportacao);
+            await DataDosDados.RegistrarAsync(Fabrica, cliente.Id, DataDosDados.Comercial, await DataDosDados.ObterAsync(Bancos, cliente, sqlComercial, DataDosDados.Comercial));
+            aviso = $"{linhas:N0} linha(s) (dia × vendedor) de {anoImportacao} importada(s), com os feriados do ERP.";
+            await AbrirEmpresa();
+        }
+        catch (Exception ex) { erro = ex.Message; }
+        finally { ocupado = false; }
+    }
+
+    private async Task SalvarSql()
+    {
+        if (empresa is null || !acesso.EditaSql) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        await db.Clientes.Where(c => c.Id == empresa.Id).ExecuteUpdateAsync(u => u.SetProperty(c => c.SqlComercial, sqlComercial));
+        erro = null;
+        aviso = "SQL do Comercial salvo no cadastro do cliente.";
+    }
+}

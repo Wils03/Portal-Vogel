@@ -1,0 +1,130 @@
+@implements IDisposable
+
+@inject NavigationManager NavigationManager
+
+<div class="marca">
+    <a href=""><img src="img/logo-vogel.jpg" alt="Vogel Gestão e Tecnologia" /></a>
+</div>
+
+<input type="checkbox" title="Menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        <AuthorizeView>
+            <Authorized Context="usuario">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                        <span class="bi bi-speedometer2 me-2" aria-hidden="true"></span> Painel
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="alertas">
+                        <span class="bi bi-bell me-2" aria-hidden="true"></span> Alertas
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+        <AuthorizeView Roles="@Perfis.Gestao">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="rotinas">
+                        <span class="bi bi-list-check me-2" aria-hidden="true"></span> Rotinas
+                    </NavLink>
+                </div>
+        </AuthorizeView>
+        <AuthorizeView Roles="@Perfis.Administrador">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="clientes">
+                        <span class="bi bi-building me-2" aria-hidden="true"></span> Clientes
+                    </NavLink>
+                </div>
+        </AuthorizeView>
+        <AuthorizeView>
+            <Authorized Context="usuario">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="precificacao">
+                        <span class="bi bi-calculator me-2" aria-hidden="true"></span> Precificação
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="mensagens">
+                        <span class="bi bi-whatsapp me-2" aria-hidden="true"></span> Mensagens
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+        <AuthorizeView Roles="@Perfis.Gestao">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="dre">
+                        <span class="bi bi-bar-chart-line me-2" aria-hidden="true"></span> DRE
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="comercial">
+                        <span class="bi bi-people me-2" aria-hidden="true"></span> Comercial
+                    </NavLink>
+                </div>
+        </AuthorizeView>
+        <AuthorizeView Roles="@Perfis.Administrador">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="configuracoes">
+                        <span class="bi bi-gear me-2" aria-hidden="true"></span> Configurações
+                    </NavLink>
+                </div>
+        </AuthorizeView>
+        <AuthorizeView Roles="@Perfis.GerenciamUsuarios">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="usuarios">
+                        <span class="bi bi-people me-2" aria-hidden="true"></span> Usuários
+                    </NavLink>
+                </div>
+        </AuthorizeView>
+
+        <AuthorizeView>
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="Account/Manage">
+                        <span class="bi bi-person-circle me-2" aria-hidden="true"></span> @context.User.Identity?.Name
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <form action="Account/Logout" method="post">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="ReturnUrl" value="" />
+                        <button type="submit" class="nav-link">
+                            <span class="bi bi-box-arrow-left me-2" aria-hidden="true"></span> Sair
+                        </button>
+                    </form>
+                </div>
+            </Authorized>
+            <NotAuthorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="Account/Login">
+                        <span class="bi bi-box-arrow-in-right me-2" aria-hidden="true"></span> Entrar
+                    </NavLink>
+                </div>
+            </NotAuthorized>
+        </AuthorizeView>
+    </nav>
+</div>
+
+@code {
+    private string? currentUrl;
+
+    protected override void OnInitialized()
+    {
+        currentUrl = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        currentUrl = NavigationManager.ToBaseRelativePath(e.Location);
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}
+

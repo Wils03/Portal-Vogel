@@ -1,0 +1,172 @@
+@* Programação das rotinas de UMA empresa: liga/desliga, horário e envio automático. O SQL não aparece aqui. *@
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject RotinaService Servico
+@inject MensagemService Mensageiro
+
+@if (linhas is null)
+{
+    <div class="text-muted small">Carregando...</div>
+}
+else
+{
+    @if (situacao is not null)
+    {
+        <div class="small text-muted mb-2">
+            A Vogel define o que cada rotina verifica e os limites dos avisos: horário comercial <strong>@situacao.Horario</strong>,
+            até <strong>@situacao.LimitePorClienteDia</strong> mensagem(ns) automática(s) por dia para a empresa (vários alertas vão juntos numa só).
+            Aqui você escolhe quais verificações quer, em que horário e se o aviso vai sozinho pelo WhatsApp.
+        </div>
+    }
+    @if (string.IsNullOrWhiteSpace(whatsApp))
+    {
+        <div class="alert alert-warning small">Empresa sem WhatsApp cadastrado: os alertas aparecem no portal, mas nenhum aviso é enviado. Fale com a Vogel.</div>
+    }
+    else
+    {
+        <div class="small mb-2"><i class="bi bi-whatsapp" style="color: var(--cor-whatsapp)"></i> Avisos vão para <strong>@whatsApp</strong>.</div>
+    }
+
+    @if (linhas.Count == 0)
+    {
+        <p class="text-muted m-0">Nenhuma rotina liberada para esta empresa.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="table align-middle m-0">
+                <thead>
+                    <tr>
+                        <th>Rotina</th>
+                        <th><span class="dica" title="Desligada: a verificação não roda para a sua empresa e não gera alertas nem avisos.">Ligada</span></th>
+                        <th><span class="dica" title="Hora do dia em que a verificação roda. O aviso sai logo depois, se estiver dentro do horário comercial; fora dele, sai quando abrir.">Horário</span></th>
+                        <th><span class="dica" title="Ligado: quando a verificação encontrar um problema novo, o aviso vai sozinho pelo WhatsApp (uma vez por ocorrência). Desligado: o alerta só aparece no portal.">Aviso automático no WhatsApp</span></th>
+                        <th><span class="dica" title="Última vez que a verificação rodou para a sua empresa.">Última verificação</span></th>
+                        <th class="num"><span class="dica" title="Alertas desta rotina ainda não resolvidos.">Em aberto</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var l in linhas)
+                    {
+                        <tr class="@(l.Ativa ? "" : "text-muted")">
+                            <td>
+                                @l.Rotina.Nome <span class="selo selo-@l.Rotina.Severidade ms-1">@Rotulos.Texto(l.Rotina.Severidade)</span>
+                                <div class="small text-muted">@l.Rotina.Descricao</div>
+                            </td>
+                            <td>
+                                <div class="form-check form-switch m-0">
+                                    <input class="form-check-input" type="checkbox" checked="@l.Ativa" disabled="@(!PodeEditar)"
+                                           @onchange="e => Alterar(l, ativa: e.Value is true)" />
+                                </div>
+                            </td>
+                            <td>
+                                <select class="form-select form-select-sm w-auto" disabled="@(!PodeEditar || !l.Ativa)"
+                                        value="@(l.Hora?.ToString() ?? "")" @onchange="e => Alterar(l, hora: e.Value as string ?? string.Empty)">
+                                    <option value="">Padrão (@(l.Rotina.HoraExecucao is int p ? $"{p:00}:00" : "não roda sozinha"))</option>
+                                    @for (var h = 0; h < 24; h++) { <option value="@h">@($"{h:00}:00")</option> }
+                                </select>
+                            </td>
+                            <td>
+                                @if (!l.Rotina.EnviarAutomaticamente)
+                                {
+                                    <span class="small text-muted" title="A Vogel não liberou o aviso automático para esta rotina.">não liberado</span>
+                                }
+                                else
+                                {
+                                    <div class="form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" checked="@l.Auto" disabled="@(!PodeEditar || !l.Ativa)"
+                                               @onchange="e => Alterar(l, auto: e.Value is true)" />
+                                    </div>
+                                }
+                            </td>
+                            <td class="small">@(l.Ultima?.ToString("dd/MM HH:mm") ?? "—")</td>
+                            <td class="num">@l.Abertos</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    @if (aviso is not null) { <div class="small positivo mt-2">@aviso</div> }
+    @if (erro is not null) { <div class="small negativo mt-2">@erro</div> }
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClienteId { get; set; }
+    [Parameter, EditorRequired] public Acesso Acesso { get; set; } = Acesso.Nenhum;
+
+    private sealed class Linha
+    {
+        public required Rotina Rotina { get; init; }
+        public bool Ativa { get; set; }
+        public bool Auto { get; set; }
+        public int? Hora { get; set; }
+        public DateTime? Ultima { get; set; }
+        public int Abertos { get; set; }
+    }
+
+    private List<Linha>? linhas;
+    private SituacaoEnvio? situacao;
+    private string? whatsApp, aviso, erro;
+    private int carregado = -1;
+
+    private bool PodeEditar => Acesso.ProgramaRotinas && Acesso.PodeVerCliente(ClienteId);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (carregado == ClienteId) return;
+        carregado = ClienteId;
+        aviso = erro = null;
+        await Carregar();
+    }
+
+    private async Task Carregar()
+    {
+        if (!Acesso.PodeVerCliente(ClienteId)) { linhas = []; return; }
+        await using var db = await Fabrica.CreateDbContextAsync();
+        var cliente = await db.Clientes.AsNoTracking().FirstOrDefaultAsync(c => c.Id == ClienteId);
+        if (cliente is null) { linhas = []; return; }
+        whatsApp = cliente.WhatsApp;
+        // Só as rotinas que a Vogel liberou e que servem para o banco da empresa
+        var rotinas = await db.Rotinas.AsNoTracking()
+            .Where(r => r.Ativa && (r.TipoBanco == null || r.TipoBanco == cliente.TipoBanco))
+            .OrderBy(r => r.Nome).ToListAsync();
+        var programacao = await db.RotinasClientes.AsNoTracking().Where(r => r.ClienteId == ClienteId).ToDictionaryAsync(r => r.RotinaId);
+        var abertos = await db.Alertas.AsNoTracking()
+            .Where(a => a.ClienteId == ClienteId && (a.Status == StatusAlerta.Novo || a.Status == StatusAlerta.Notificado))
+            .GroupBy(a => a.RotinaId).Select(g => new { g.Key, Total = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Total);
+
+        linhas = rotinas.Select(r =>
+        {
+            programacao.TryGetValue(r.Id, out var daEmpresa);
+            return new Linha
+            {
+                Rotina = r,
+                Ativa = daEmpresa?.Ativa ?? true,
+                Auto = daEmpresa?.EnviarAutomaticamente ?? true,
+                Hora = daEmpresa?.HoraExecucao,
+                Ultima = daEmpresa?.UltimaExecucao,
+                Abertos = abertos.GetValueOrDefault(r.Id)
+            };
+        }).ToList();
+        situacao = await Mensageiro.SituacaoAsync();
+    }
+
+    private async Task Alterar(Linha l, bool? ativa = null, bool? auto = null, string? hora = null)
+    {
+        aviso = erro = null;
+        if (!PodeEditar) return;
+        var novaAtiva = ativa ?? l.Ativa;
+        var novoAuto = auto ?? l.Auto;
+        var novaHora = hora is null ? l.Hora : int.TryParse(hora, out var h) ? h : null;
+        try
+        {
+            await Servico.SalvarProgramacaoAsync(l.Rotina.Id, ClienteId, novaAtiva, novoAuto, novaHora, Acesso.Email);
+            l.Ativa = novaAtiva;
+            l.Auto = novoAuto;
+            l.Hora = novaHora;
+            aviso = $"\"{l.Rotina.Nome}\" salva às {DateTime.Now:HH:mm}.";
+        }
+        catch (Exception ex) { erro = ex.Message; }
+    }
+}

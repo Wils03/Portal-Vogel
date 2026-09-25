@@ -1,0 +1,155 @@
+@page "/mensagens"
+@attribute [Authorize]
+@implements IDisposable
+@inject ClienteAtualService ClienteAtual
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject MensagemService Mensageiro
+@inject AcessoService Acessos
+
+<PageTitle>Mensagens · Vogel</PageTitle>
+
+<div class="cabecalho-pagina">
+    <h1>Mensagens</h1>
+    @if (acesso.EhVogel)
+    {
+    <span class="selo @(situacao?.PagebotConfigurado == true ? "selo-Resolvido" : "selo-Info")">
+        Modo: @(situacao?.PagebotConfigurado == true ? "Pagebot" : "manual (link WhatsApp)")
+    </span>
+    }
+</div>
+
+@if (situacao is not null)
+{
+    <div class="cartao">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <h2 class="h5 m-0">Envio automático — proteções do número</h2>
+            <button class="btn btn-sm btn-outline-primary" @onclick="Simular" disabled="@simulando">
+                <i class="bi bi-eye"></i> Simular agora (não envia nada)
+            </button>
+        </div>
+        @if (situacao.ModoTeste)
+        {
+            <div class="alert @(situacao.NumeroTeste is null ? "alert-danger" : "alert-warning") small mb-2">
+                <strong>MODO TESTE ligado.</strong>
+                @if (situacao.NumeroTeste is null)
+                {
+                    <span>Nenhum <code>NumeroTeste</code> configurado: nenhuma mensagem sai pelo Pagebot.</span>
+                }
+                else
+                {
+                    <span>Todas as mensagens do Pagebot vão para <strong>@situacao.NumeroTeste</strong>, com "[TESTE → cliente]" no início. Os clientes não recebem nada.</span>
+                }
+            </div>
+        }
+        <div class="row g-3 small">
+            <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="Envios pelo Pagebot hoje, somando todos os clientes. Ao atingir o limite, os próximos ficam para amanhã.">Enviadas hoje</span></div><div class="valor">@situacao.EnviadosHoje / @situacao.LimiteDiario</div></div></div>
+            <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="Cada cliente recebe no máximo este número de mensagens automáticas por dia. Vários alertas do mesmo cliente vão juntos numa mensagem só.">Por cliente / dia</span></div><div class="valor">@situacao.LimitePorClienteDia</div></div></div>
+            <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="Espera mínima entre um envio automático e o próximo. Nunca envia em rajada.">Intervalo entre envios</span></div><div class="valor">@situacao.IntervaloSegundos s</div></div></div>
+            <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="Envios automáticos só neste horário. Fora dele, ficam na fila.">Horário comercial</span></div><div class="valor" style="font-size: 1rem">@situacao.Horario</div><div class="detalhe">@(situacao.DentroDoHorario ? "aberto agora" : "fechado agora")</div></div></div>
+        </div>
+
+        @if (plano is not null)
+        {
+            <h3 class="h6 mt-3">Simulação: o que sairia agora</h3>
+            @if (plano.Count == 0)
+            {
+                <p class="text-muted small m-0">Nenhum alerta novo aguardando envio automático.</p>
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table class="table table-sm align-middle small m-0">
+                        <thead><tr><th>Cliente</th><th>Destino</th><th>Alertas</th><th>Mensagem</th><th>Situação</th></tr></thead>
+                        <tbody>
+                            @foreach (var p in plano)
+                            {
+                                <tr>
+                                    <td>@p.Cliente.Nome</td>
+                                    <td>@p.Destino</td>
+                                    <td>@string.Join(", ", p.Alertas.Select(a => a.Rotina?.Nome))</td>
+                                    <td style="white-space: pre-line; max-width: 420px">@p.Texto</td>
+                                    <td>
+                                        @if (p.Bloqueio is null) { <span class="selo selo-Resolvido">Sairia agora</span> }
+                                        else { <span class="selo selo-Atencao">Aguardando</span> <div class="text-muted">@p.Bloqueio</div> }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="small text-muted mt-1">Mesmo liberadas, as mensagens saem uma por vez, respeitando o intervalo.</div>
+            }
+        }
+    </div>
+}
+
+<div class="cartao">
+    <h2 class="h5">Histórico</h2>
+    <div class="table-wrap">
+        <table class="table table-sm align-middle m-0">
+            <thead><tr><th>Data</th>@if (acesso.EhVogel) { <th>Cliente</th> }<th>Destino</th><th>Canal</th><th>Mensagem</th>@if (acesso.EhVogel) { <th>Usuário</th> }<th>Situação</th></tr></thead>
+            <tbody>
+                @foreach (var m in mensagens)
+                {
+                    <tr>
+                        <td class="text-nowrap">@m.DataHora.ToString("dd/MM HH:mm")</td>
+                        @if (acesso.EhVogel) { <td>@clientes.GetValueOrDefault(m.ClienteId, "(cliente excluído)")</td> }
+                        <td>@m.Destino</td>
+                        <td>@m.Canal</td>
+                        <td class="small" style="max-width: 420px; white-space: pre-line">@m.Texto</td>
+                        @if (acesso.EhVogel) { <td class="small">@m.Usuario</td> }
+                        <td>
+                            <span class="selo @(m.Sucesso ? "selo-Resolvido" : "selo-Erro")" title="@m.Retorno">@(m.Sucesso ? "OK" : "Falha")</span>
+                            @if (!m.Sucesso && acesso.EhVogel) { <div class="small text-muted" style="max-width: 260px">@MensagemService.ExplicarRetorno(m.Retorno)</div> }
+                        </td>
+                    </tr>
+                }
+                @if (mensagens.Count == 0) { <tr><td colspan="@(acesso.EhVogel ? 7 : 5)" class="text-muted">Nenhuma mensagem ainda.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private List<MensagemEnviada> mensagens = [];
+    private Dictionary<int, string> clientes = [];
+    private SituacaoEnvio? situacao;
+    private List<PlanoEnvio>? plano;
+    private bool simulando;
+    private Acesso acesso = Acesso.Nenhum;
+
+    protected override async Task OnInitializedAsync()
+    {
+        acesso = await Acessos.ObterAsync();
+        ClienteAtual.Mudou += AoMudarCliente;
+        await Carregar();
+    }
+
+    private Task AoMudarCliente() => InvokeAsync(async () => { await Carregar(); StateHasChanged(); });
+
+    public void Dispose() => ClienteAtual.Mudou -= AoMudarCliente;
+
+    private async Task Carregar()
+    {
+        await using var db = await Fabrica.CreateDbContextAsync();
+        clientes = await acesso.Filtrar(db.Clientes).AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Nome);
+        // Envio agrupado grava uma linha por alerta: mostra uma vez só
+        var q = acesso.Filtrar(db.Mensagens).AsNoTracking();
+        if (ClienteAtual.Filtro is int foco) q = q.Where(m => m.ClienteId == foco); // cliente escolhido no topo
+        mensagens = (await q.OrderByDescending(m => m.DataHora).Take(600).ToListAsync())
+            .DistinctBy(m => (m.ClienteId, m.DataHora, m.Texto)).Take(300).ToList();
+        if (acesso.EhVogel) situacao = await Mensageiro.SituacaoAsync();
+    }
+
+    private async Task Simular()
+    {
+        if (!acesso.EhVogel) return;
+        simulando = true;
+        try
+        {
+            situacao = await Mensageiro.SituacaoAsync();
+            plano = await Mensageiro.PlanejarAsync();
+        }
+        finally { simulando = false; }
+    }
+}

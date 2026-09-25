@@ -1,0 +1,450 @@
+@page "/precificacao"
+@attribute [Authorize]
+@implements IDisposable
+@inject ClienteAtualService ClienteAtual
+@using System.Data
+@using System.Globalization
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject BancoClienteService Bancos
+@inject IJSRuntime JS
+@inject AcessoService Acessos
+@inject MensagemService Mensageiro
+
+<PageTitle>Precificação · Vogel</PageTitle>
+
+<div class="cabecalho-pagina">
+    <h1>Precificação e ponto de equilíbrio@(cliente is not null ? $" · {cliente.Nome}" : "")</h1>
+</div>
+
+@if (cliente is null)
+{
+    <div class="cartao text-muted">@(acesso.EhVogel ? "Escolha o cliente no topo da tela. Os parâmetros (impostos, comissão, custos fixos, margem) ficam no cadastro do cliente e podem vir da DRE." : "Seu usuário não está ligado a uma empresa ativa. Fale com a Vogel.")</div>
+}
+else
+{
+    <div class="cartao">
+        <div class="row g-2 align-items-end">
+            <div class="col-6 col-md-2"><label class="form-label small"><span class="dica" title="Impostos sobre a venda usados só nos produtos sem grupo de formação de preço.">Impostos %</span> <span class="text-muted">(sem grupo)</span></label><input class="form-control" type="number" step="0.01" @bind="cliente.ImpostosPct" @bind:after="Recalcular" /></div>
+            <div class="col-6 col-md-2"><label class="form-label small"><span class="dica" title="Comissão de vendedores sobre o preço de venda.">Comissão %</span></label><input class="form-control" type="number" step="0.01" @bind="cliente.ComissaoPct" @bind:after="Recalcular" /></div>
+            <div class="col-6 col-md-2"><label class="form-label small"><span class="dica" title="Outros custos que variam com a venda: taxa de cartão, frete de entrega, embalagem...">Outros variáveis %</span></label><input class="form-control" type="number" step="0.01" @bind="cliente.OutrosVariaveisPct" @bind:after="Recalcular" /></div>
+            <div class="col-6 col-md-2"><label class="form-label small"><span class="dica" title="Lucro líquido que a empresa quer ter sobre o preço de venda, depois de todas as despesas.">Margem desejada %</span></label><input class="form-control" type="number" step="0.01" @bind="cliente.MargemDesejadaPct" @bind:after="Recalcular" /></div>
+            <div class="col-6 col-md-2"><label class="form-label small"><span class="dica" title="Despesas que não dependem da venda: salários, aluguel, contador, juros... Pode vir da DRE.">Custos fixos / mês</span></label><input class="form-control" type="number" step="0.01" @bind="cliente.CustosFixosMensais" @bind:after="Recalcular" /></div>
+            <div class="col-6 col-md-2"><label class="form-label small"><span class="dica" title="Faturamento médio mensal. Usado para calcular quanto as despesas fixas pesam em cada venda.">Faturamento / mês</span></label><input class="form-control" type="number" step="0.01" @bind="cliente.FaturamentoMedioMensal" @bind:after="Recalcular" /></div>
+            <div class="col-12 small text-muted">
+                Quando o produto vem do ERP com <strong>grupo de formação de preço</strong>, os impostos do grupo substituem o "Impostos %" acima.
+                Custos fixos e faturamento podem ser preenchidos pela DRE (botão "Usar na precificação").
+            </div>
+            <div class="col-12">
+                @if (acesso.Altera) { <button class="btn btn-sm btn-outline-primary" @onclick="SalvarParametros">Salvar parâmetros</button> }
+                else { <span class="small text-muted">Você pode alterar os valores para simular; só o gestor da empresa salva.</span> }
+            </div>
+        </div>
+    </div>
+
+    @if (resumo is not null)
+    {
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-lg-3"><div class="cartao kpi"><div class="rotulo"><span class="dica" title="Quanto as despesas fixas pesam sobre o faturamento. Entra no preço sugerido.">Despesas fixas s/ faturamento</span></div><div class="valor">@resumo.DespesasFixasPct.ToString("P1")</div><div class="detalhe">custos fixos ÷ faturamento</div></div></div>
+            <div class="col-6 col-lg-3"><div class="cartao kpi"><div class="rotulo"><span class="dica" title="Média da margem de contribuição dos produtos, ponderada pelo quanto cada um vende.">Margem de contribuição média</span></div><div class="valor @(resumo.MargemContribuicaoMediaPct < 0 ? "negativo" : "")">@resumo.MargemContribuicaoMediaPct.ToString("P1")</div><div class="detalhe">ponderada pela venda de cada produto</div></div></div>
+            <div class="col-6 col-lg-3"><div class="cartao kpi"><div class="rotulo"><span class="dica" title="Faturamento mínimo por mês para pagar todas as despesas fixas, sem lucro nem prejuízo.">Ponto de equilíbrio / mês</span></div><div class="valor">@resumo.PontoEquilibrioValor.ToString("C0")</div><div class="detalhe">custos fixos ÷ MC%</div></div></div>
+            <div class="col-6 col-lg-3"><div class="cartao kpi"><div class="rotulo"><span class="dica" title="Produtos vendidos nos últimos 90 dias com preço mais de 2% abaixo do que a regra do ERP sugere.">Abaixo da regra do ERP</span></div><div class="valor @(abaixoRegra > 0 ? "negativo" : "")">@abaixoRegra.ToString("N0")</div><div class="detalhe">produtos com venda e preço &lt; regra (−2%)</div></div></div>
+        </div>
+    }
+
+    <div class="cartao">
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+            <h2 class="h5 m-0 me-auto">Produtos (@produtos.Count.ToString("N0"))</h2>
+            @if (acesso.Altera)
+            {
+                <label class="btn btn-sm btn-outline-secondary m-0">
+                    <i class="bi bi-upload"></i> Importar CSV/XLSX
+                    <InputFile class="d-none" OnChange="Importar" accept=".csv,.xlsx" />
+                </label>
+            }
+            @if (acesso.EditaSql) { <button class="btn btn-sm btn-outline-secondary" @onclick="() => mostrarSql = !mostrarSql"><i class="bi bi-database"></i> SQL do banco</button> }
+            <button class="btn btn-sm btn-outline-secondary" @onclick="Exportar" disabled="@(produtos.Count == 0)"><i class="bi bi-file-earmark-excel"></i> Exportar</button>
+            @if (acesso.Altera) { <button class="btn btn-sm btn-outline-danger" @onclick="Limpar" disabled="@(produtos.Count == 0)">Limpar</button> }
+            @if (acesso.AtualizaDoBanco)
+            {
+                <div class="input-group input-group-sm w-auto">
+                    <span class="input-group-text">Filial</span>
+                    <input class="form-control" style="width: 4rem" type="number" min="1" @bind="filial" />
+                </div>
+                <button class="btn btn-sm btn-primary" @onclick="ImportarDoBanco" disabled="@(ocupado || string.IsNullOrWhiteSpace(sqlProdutos))">
+                    @if (ocupado) { <span class="spinner-border spinner-border-sm me-1"></span> <span>Consultando o banco...</span> }
+                    else { <i class="bi bi-arrow-repeat"></i> <span>Atualizar do banco</span> }
+                </button>
+            }
+        </div>
+
+        @if (mostrarSql && acesso.EditaSql)
+        {
+            <div class="border rounded p-2 mb-2">
+                <div class="small text-muted mb-1">
+                    Colunas: <code>Codigo, Descricao, Custo, Preco, QtdMes</code> e, opcionais, <code>ImpostosPct, GrupoPreco, LucroDesejadoPct, LucroSobre</code> ("Custo" = markup, "Preço de Venda" = margem).
+                    Use <code>{filial}</code>. Somente leitura: roda em transação desfeita, não altera nada no banco do cliente.
+                </div>
+                <textarea class="form-control sql mb-2" rows="10" @bind="sqlProdutos"></textarea>
+                <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => sqlProdutos = ModelosSql.PrecificacaoBaseLv" title="Lê o resultado pronto da BASELV (gravado todo dia pelo SincronizadorLV), sem consultar as tabelas do ERP">Usar BASELV (recomendado)</button>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => sqlProdutos = ModelosSql.PrecificacaoSqlServer">Usar modelo do ERP (SQL Server)</button>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="SalvarSql" disabled="@string.IsNullOrWhiteSpace(sqlProdutos)">Salvar SQL no cliente</button>
+                </div>
+            </div>
+        }
+        @if (erro is not null) { <div class="alert alert-danger small">@erro</div> }
+        @if (aviso is not null) { <div class="alert alert-success small">@aviso</div> }
+
+        @if (resumo is { Produtos.Count: > 0 })
+        {
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                <input class="form-control form-control-sm w-auto" placeholder="Buscar código ou descrição..." @bind="busca" @bind:event="oninput" />
+                <div class="form-check m-0"><input class="form-check-input" type="checkbox" id="soVenda" @bind="soComVenda" /><label class="form-check-label small" for="soVenda">Só com venda</label></div>
+                <div class="form-check m-0"><input class="form-check-input" type="checkbox" id="soProb" @bind="soProblemas" /><label class="form-check-label small" for="soProb">Só problemas</label></div>
+                <select class="form-select form-select-sm w-auto" @bind="ordem">
+                    <option value="faturamento">Maior venda (R$/mês)</option>
+                    <option value="margem">Menor margem líquida</option>
+                    <option value="regra">Mais abaixo da regra do ERP</option>
+                </select>
+                <span class="small text-muted">@Filtrados.Count().ToString("N0") produto(s)</span>
+                @if (acesso.EnviaAvisoPrecos)
+                {
+                    <span class="ms-md-auto small">
+                        <span class="dica" title="Marque os produtos para avisar alguém pelo WhatsApp que o preço precisa de revisão.">Marcados: <strong>@marcados.Count</strong></span>
+                        <button class="btn btn-link btn-sm p-0 ms-2" @onclick="MarcarAbaixoRegra">marcar abaixo da regra (−2%)</button>
+                        @if (marcados.Count > 0) { <button class="btn btn-link btn-sm p-0 ms-2" @onclick="() => marcados.Clear()">limpar</button> }
+                    </span>
+                }
+            </div>
+
+            @if (acesso.EnviaAvisoPrecos && marcados.Count > 0)
+            {
+                <div class="border rounded p-2 mb-2">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                        <strong><i class="bi bi-whatsapp" style="color: var(--cor-whatsapp)"></i> Avisar para revisão de preços (@marcados.Count produto(s))</strong>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="MontarAviso"><i class="bi bi-arrow-repeat"></i> Refazer mensagem</button>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <label class="form-label small"><span class="dica" title="Nome de quem vai revisar os preços. Aparece no início da mensagem.">Para (nome)</span></label>
+                            <input class="form-control form-control-sm" @bind="avisoNome" @bind:after="MontarAviso" maxlength="100" placeholder="Ex.: João (compras)" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small"><span class="dica" title="55 + DDD + número de quem vai revisar.">WhatsApp</span></label>
+                            <input class="form-control form-control-sm" @bind="avisoWhatsApp" placeholder="5551999999999" />
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="form-check small">
+                                <input class="form-check-input" type="checkbox" id="salvarContato" @bind="salvarContatoAviso" />
+                                <label class="form-check-label" for="salvarContato">Salvar como contato de preços da empresa</label>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <textarea class="form-control form-control-sm" rows="10" @bind="avisoTexto"></textarea>
+                            <div class="form-text">Pode editar antes de enviar. @(marcados.Count > AvisoPrecos.MaximoItens ? $"Lista os {AvisoPrecos.MaximoItens} primeiros e resume o resto." : "")</div>
+                        </div>
+                        <div class="col-12 d-flex flex-wrap gap-2 align-items-center">
+                            @if (Mensageiro.EnvioAutomatico)
+                            {
+                                <button class="btn btn-sm btn-whatsapp" @onclick="EnviarAviso" disabled="@enviandoAviso">
+                                    @if (enviandoAviso) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                    <i class="bi bi-whatsapp"></i> @(Mensageiro.ModoTeste ? "Enviar (modo teste)" : "Enviar")
+                                </button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-whatsapp" @onclick="EnviarAviso" disabled="@enviandoAviso"><i class="bi bi-whatsapp"></i> Gerar link do WhatsApp</button>
+                            }
+                            @if (linkAviso is not null) { <a class="btn btn-sm btn-outline-success" target="_blank" href="@linkAviso">Abrir no WhatsApp</a> }
+                            @if (Mensageiro.ModoTeste && Mensageiro.EnvioAutomatico) { <span class="small text-muted">Modo teste: vai para o número de teste, não para o destinatário.</span> }
+                            @if (retornoAviso is not null) { <span class="small @(avisoOk ? "positivo" : "negativo")">@retornoAviso</span> }
+                        </div>
+                    </div>
+                </div>
+            }
+            <div class="table-wrap">
+                <table class="table table-sm table-hover align-middle">
+                    <thead>
+                        <tr>
+                            @if (acesso.EnviaAvisoPrecos) { <th></th> }
+                            <th><span class="dica" title="Código do produto no ERP.">Código</span></th>
+                            <th><span class="dica" title="Descrição do produto no ERP.">Descrição</span></th>
+                            <th><span class="dica" title="Soma dos impostos sobre a venda do grupo de formação de preço cadastrado no ERP (ex.: ICMS + PIS/COFINS). Passe o mouse no valor para ver o nome do grupo.">Grupo</span></th>
+                            <th class="num"><span class="dica" title="Custo Atual do produto na filial (o mesmo que o ERP usa para sugerir preço).">Custo</span></th>
+                            <th class="num"><span class="dica" title="Preço de venda atual da lista 1.">Preço atual</span></th>
+                            <th class="num"><span class="dica" title="Preço que o ERP do cliente sugeriria com a regra dele: custo + impostos do grupo + lucro desejado cadastrado no ERP (margem ou markup). Sem o arredondamento do ERP.">Regra ERP</span></th>
+                            <th class="num"><span class="dica" title="Quanto o preço atual está acima (+) ou abaixo (−) da regra do ERP. Vermelho: mais de 2% abaixo.">Dif.</span></th>
+                            <th class="num"><span class="dica" title="Preço que cobre impostos, comissão, despesas fixas da empresa e a margem desejada.">Sugerido c/ fixas</span></th>
+                            <th class="num"><span class="dica" title="Margem de contribuição: o que sobra do preço após impostos, comissão e custo, para pagar as despesas fixas.">MC %</span></th>
+                            <th class="num"><span class="dica" title="Lucro real do preço atual depois de impostos, comissão, custo e despesas fixas. Negativo = vende com prejuízo.">Margem líq.</span></th>
+                            <th class="num"><span class="dica" title="Média de unidades vendidas por mês nos últimos 90 dias (já descontadas as devoluções).">Qtd/mês</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in Filtrados.Take(500))
+                        {
+                            var difRegra = DifRegra(a);
+                            <tr class="@(marcados.Contains(a.Produto.Codigo) ? "table-warning" : "")">
+                                @if (acesso.EnviaAvisoPrecos)
+                                {
+                                    <td><input class="form-check-input" type="checkbox" checked="@marcados.Contains(a.Produto.Codigo)" @onchange="e => Marcar(a, e.Value is true)" title="Marcar para avisar" /></td>
+                                }
+                                <td>@a.Produto.Codigo</td>
+                                <td>@a.Produto.Descricao</td>
+                                <td class="small text-nowrap" title="@a.Produto.GrupoPreco">@(a.Produto.ImpostosPct is decimal ip ? ip.ToString("0.##") + "%" : "—")</td>
+                                <td class="num">@a.Produto.Custo.ToString("C2")</td>
+                                <td class="num">@a.Produto.PrecoAtual.ToString("C2")</td>
+                                <td class="num" title="@TituloRegra(a.Produto)">@(a.PrecoRegraSistema?.ToString("C2") ?? "—")</td>
+                                <td class="num @(difRegra < -0.02m ? "negativo" : "")">@(difRegra?.ToString("P1") ?? "")</td>
+                                <td class="num">@a.PrecoSugerido.ToString("C2")</td>
+                                <td class="num @(a.MargemContribuicao < 0 ? "negativo" : "")">@a.MargemContribuicaoPct.ToString("P1")</td>
+                                <td class="num @(a.MargemLiquidaPct < 0 ? "negativo" : "")">@a.MargemLiquidaPct.ToString("P1")</td>
+                                <td class="num">@a.Produto.QtdMes.ToString("N0")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div class="small text-muted">Exibindo até 500 linhas; a exportação traz todos os produtos filtrados.</div>
+        }
+    </div>
+
+    <div class="cartao small text-muted">
+        <strong>Como calcula:</strong>
+        <ul class="mb-0">
+            <li><strong>Regra ERP</strong>: lucro sobre o preço de venda (margem) → Custo ÷ (1 − impostos do grupo − lucro); lucro sobre o custo (markup) → Custo × (1 + lucro) ÷ (1 − impostos). Sem arredondamento de preço.</li>
+            <li><strong>Sugerido c/ fixas</strong>: Custo ÷ (1 − impostos − comissão − outros − despesas fixas% − margem desejada).</li>
+            <li><strong>MC %</strong> = (Preço × (1 − impostos − comissão − outros) − Custo) ÷ Preço. <strong>Margem líquida</strong> desconta também as despesas fixas%.</li>
+            <li><strong>Ponto de equilíbrio</strong> = custos fixos ÷ margem de contribuição média ponderada pela venda.</li>
+        </ul>
+    </div>
+}
+
+@code {
+    private List<Cliente> clientes = [];
+    private int clienteId;
+    private Cliente? cliente;
+    private List<Produto> produtos = [];
+    private ResumoPrecificacao? resumo;
+    private bool mostrarSql, ocupado, soComVenda = true, soProblemas;
+    private string? sqlProdutos, erro, aviso, busca;
+    private string ordem = "faturamento";
+    private int filial = 1;
+
+    [SupplyParameterFromQuery(Name = "problemas")] public int? Problemas { get; set; }
+    private int abaixoRegra;
+    private Acesso acesso = Acesso.Nenhum;
+
+    // Aviso de revisão de preços pelo WhatsApp
+    private HashSet<string> marcados = [];
+    private string? avisoNome, avisoWhatsApp, avisoTexto, retornoAviso, linkAviso;
+    private bool salvarContatoAviso, enviandoAviso, avisoOk;
+
+    private static decimal? DifRegra(AnaliseProduto a) =>
+        a.PrecoRegraSistema is decimal r && r > 0 ? (a.Produto.PrecoAtual - r) / r : null;
+
+    private static string TituloRegra(Produto p) => p.LucroDesejadoPct is decimal l
+        ? $"Lucro {l:0.##}% sobre o {(p.LucroSobreCusto == true ? "custo (markup)" : "preço de venda (margem)")} · {p.GrupoPreco}"
+        : "";
+
+    private IEnumerable<AnaliseProduto> Filtrados
+    {
+        get
+        {
+            if (resumo is null) return [];
+            IEnumerable<AnaliseProduto> q = resumo.Produtos;
+            if (soComVenda) q = q.Where(a => a.Produto.QtdMes > 0);
+            if (soProblemas) q = q.Where(CalculoPreco.TemProblema);
+            if (!string.IsNullOrWhiteSpace(busca))
+                q = q.Where(a => a.Produto.Codigo.Contains(busca, StringComparison.OrdinalIgnoreCase)
+                              || a.Produto.Descricao.Contains(busca, StringComparison.OrdinalIgnoreCase));
+            return ordem switch
+            {
+                "margem" => q.OrderBy(a => a.MargemLiquidaPct),
+                "regra" => q.OrderBy(a => DifRegra(a) ?? decimal.MaxValue),
+                _ => q.OrderByDescending(a => a.Produto.PrecoAtual * a.Produto.QtdMes)
+            };
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Problemas == 1) { soProblemas = true; soComVenda = true; }
+        acesso = await Acessos.ObterAsync();
+        await using var db = await Fabrica.CreateDbContextAsync();
+        clientes = await acesso.Filtrar(db.Clientes).AsNoTracking().Where(c => c.Ativo).OrderBy(c => c.Nome).ToListAsync();
+        ClienteAtual.Mudou += AoMudarCliente;
+        clienteId = acesso.EhCliente ? acesso.ClienteId!.Value : ClienteAtual.ClienteId;
+        if (clienteId > 0) await Carregar();
+    }
+
+    private Task AoMudarCliente() => InvokeAsync(async () =>
+    {
+        if (acesso.EhCliente) return;
+        clienteId = ClienteAtual.ClienteId;
+        await Carregar();
+        StateHasChanged();
+    });
+
+    public void Dispose() => ClienteAtual.Mudou -= AoMudarCliente;
+
+    private async Task Carregar()
+    {
+        erro = aviso = null;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        cliente = await acesso.Filtrar(db.Clientes).AsNoTracking().FirstOrDefaultAsync(c => c.Id == clienteId);
+        produtos = cliente is null ? [] : await db.Produtos.AsNoTracking().Where(p => p.ClienteId == clienteId).ToListAsync();
+        sqlProdutos = acesso.AtualizaDoBanco ? cliente?.SqlPrecificacao : null;
+        filial = cliente?.FilialPrecificacao ?? 1;
+        marcados.Clear();
+        avisoNome = cliente?.AvisoPrecosNome;
+        avisoWhatsApp = cliente?.AvisoPrecosWhatsApp;
+        avisoTexto = retornoAviso = linkAviso = null;
+        Recalcular();
+    }
+
+    private void Marcar(AnaliseProduto a, bool marcar)
+    {
+        if (marcar) marcados.Add(a.Produto.Codigo); else marcados.Remove(a.Produto.Codigo);
+        MontarAviso();
+    }
+
+    private void MarcarAbaixoRegra()
+    {
+        foreach (var a in Filtrados.Where(CalculoPreco.AbaixoDaRegra)) marcados.Add(a.Produto.Codigo);
+        MontarAviso();
+    }
+
+    private void MontarAviso()
+    {
+        retornoAviso = linkAviso = null;
+        if (resumo is null || cliente is null || marcados.Count == 0) { avisoTexto = null; return; }
+        // Mais abaixo da regra primeiro
+        var itens = resumo.Produtos.Where(a => marcados.Contains(a.Produto.Codigo))
+            .OrderBy(a => DifRegra(a) ?? a.MargemLiquidaPct).ToList();
+        avisoTexto = AvisoPrecos.Montar(cliente.Nome, avisoNome, itens, acesso.Email, DateTime.Now);
+    }
+
+    private async Task EnviarAviso()
+    {
+        if (cliente is null || !acesso.EnviaAvisoPrecos || string.IsNullOrWhiteSpace(avisoTexto)) return;
+        retornoAviso = linkAviso = null;
+        enviandoAviso = true;
+        try
+        {
+            if (MensagemService.SomenteDigitos(avisoWhatsApp).Length < 10) { avisoOk = false; retornoAviso = "Informe o WhatsApp (55 + DDD + número)."; return; }
+            await using var db = await Fabrica.CreateDbContextAsync();
+            var alvo = await acesso.Filtrar(db.Clientes).AsNoTracking().FirstOrDefaultAsync(c => c.Id == cliente.Id);
+            if (alvo is null) return;
+            if (salvarContatoAviso)
+            {
+                await acesso.Filtrar(db.Clientes).Where(c => c.Id == alvo.Id).ExecuteUpdateAsync(u => u
+                    .SetProperty(c => c.AvisoPrecosNome, string.IsNullOrWhiteSpace(avisoNome) ? null : avisoNome.Trim())
+                    .SetProperty(c => c.AvisoPrecosWhatsApp, MensagemService.SomenteDigitos(avisoWhatsApp)));
+            }
+            var r = await Mensageiro.EnviarParaAsync(alvo, avisoWhatsApp, avisoTexto, acesso.Email);
+            avisoOk = r.Sucesso;
+            linkAviso = r.LinkManual;
+            retornoAviso = !r.Sucesso ? $"Não enviou: {MensagemService.ExplicarRetorno(r.Retorno)}"
+                : r.LinkManual is not null ? "Mensagem registrada: clique em \"Abrir no WhatsApp\" para enviar."
+                : Mensageiro.ModoTeste ? $"Enviada para o número de teste ({Mensageiro.NumeroTeste})." : "Mensagem enviada.";
+            if (r.Sucesso && r.LinkManual is null) marcados.Clear();
+        }
+        finally { enviandoAviso = false; }
+    }
+
+    private void Recalcular()
+    {
+        resumo = cliente is null ? null : CalculoPreco.Calcular(cliente, produtos);
+        abaixoRegra = resumo?.Produtos.Count(a => a.Produto.QtdMes > 0 && DifRegra(a) < -0.02m) ?? 0;
+    }
+
+    private async Task SalvarParametros()
+    {
+        if (cliente is null || !acesso.Altera) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        await acesso.Filtrar(db.Clientes).Where(c => c.Id == cliente.Id).ExecuteUpdateAsync(s => s
+            .SetProperty(c => c.ImpostosPct, cliente.ImpostosPct)
+            .SetProperty(c => c.ComissaoPct, cliente.ComissaoPct)
+            .SetProperty(c => c.OutrosVariaveisPct, cliente.OutrosVariaveisPct)
+            .SetProperty(c => c.MargemDesejadaPct, cliente.MargemDesejadaPct)
+            .SetProperty(c => c.CustosFixosMensais, cliente.CustosFixosMensais)
+            .SetProperty(c => c.FaturamentoMedioMensal, cliente.FaturamentoMedioMensal));
+        erro = null;
+        aviso = "Parâmetros salvos.";
+    }
+
+    private async Task SalvarSql()
+    {
+        if (!acesso.EditaSql) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        await db.Clientes.Where(c => c.Id == clienteId).ExecuteUpdateAsync(u => u.SetProperty(c => c.SqlPrecificacao, sqlProdutos));
+        erro = null;
+        aviso = "SQL da precificação salvo no cadastro do cliente.";
+    }
+
+    private async Task Importar(InputFileChangeEventArgs e)
+    {
+        if (!acesso.Altera) return;
+        erro = aviso = null;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(30 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+            var linhas = Planilhas.Ler(ms, e.File.Name);
+            await Substituir(linhas.Select(l => ImportacaoDados.NovoProduto(nomes => l.Campo(nomes))));
+            if (cliente is not null) await DataDosDados.RegistrarAsync(Fabrica, cliente.Id, DataDosDados.Precificacao, dadosDe: null); // planilha: data dos dados desconhecida
+        }
+        catch (Exception ex) { erro = $"Não foi possível importar: {ex.Message}"; }
+    }
+
+    private async Task ImportarDoBanco()
+    {
+        if (cliente is null || string.IsNullOrWhiteSpace(sqlProdutos) || !acesso.AtualizaDoBanco) return;
+        erro = aviso = null;
+        ocupado = true;
+        try
+        {
+            await using var db = await Fabrica.CreateDbContextAsync();
+            var comConexao = await acesso.Filtrar(db.Clientes).AsNoTracking().FirstAsync(c => c.Id == clienteId);
+            // Quem não edita SQL usa sempre o que está salvo no cadastro (nada vindo da tela)
+            if (!acesso.EditaSql) sqlProdutos = comConexao.SqlPrecificacao ?? "";
+            var tabela = await Bancos.ConsultarAsync(comConexao, ModelosSql.AplicarFilial(sqlProdutos, filial), limiteLinhas: 200_000);
+            await Substituir(ImportacaoDados.Produtos(tabela));
+            await db.Clientes.Where(c => c.Id == comConexao.Id).ExecuteUpdateAsync(u => u.SetProperty(c => c.FilialPrecificacao, filial));
+            await DataDosDados.RegistrarAsync(Fabrica, comConexao.Id, DataDosDados.Precificacao,
+                await DataDosDados.ObterAsync(Bancos, comConexao, sqlProdutos, DataDosDados.Precificacao));
+            aviso = $"{produtos.Count:N0} produto(s) importado(s) da filial {filial}.";
+        }
+        catch (Exception ex) { erro = ex.Message; }
+        finally { ocupado = false; }
+    }
+
+    private async Task Substituir(IEnumerable<Produto> novos)
+    {
+        if (cliente is null || !acesso.Altera) return;
+        var lista = await ImportacaoDados.SubstituirProdutosAsync(Fabrica, cliente.Id, novos);
+        produtos = lista;
+        Recalcular();
+        aviso = $"{lista.Count:N0} produto(s) importado(s).";
+    }
+
+    private async Task Limpar() => await Substituir([]);
+
+    private async Task Exportar()
+    {
+        if (resumo is null || cliente is null) return;
+        var bytes = Planilhas.GerarXlsx("Precificacao",
+            ["Codigo", "Descricao", "Grupo", "ImpostosPct", "LucroDesejadoPct", "LucroSobre", "Custo", "PrecoAtual", "PrecoRegraSistema", "DifRegraPct",
+             "PrecoSugeridoComFixas", "MargemContribuicao", "MargemContribuicaoPct", "MargemLiquidaPct", "QtdMes", "VendaMes"],
+            Filtrados.Select(a => (IReadOnlyList<object?>)[a.Produto.Codigo, a.Produto.Descricao, a.Produto.GrupoPreco, a.Produto.ImpostosPct,
+                a.Produto.LucroDesejadoPct, a.Produto.LucroSobreCusto switch { true => "Custo", false => "Preço de Venda", _ => null },
+                a.Produto.Custo, a.Produto.PrecoAtual, a.PrecoRegraSistema is decimal r ? Math.Round(r, 2) : null, DifRegra(a),
+                Math.Round(a.PrecoSugerido, 2), Math.Round(a.MargemContribuicao, 2), a.MargemContribuicaoPct, a.MargemLiquidaPct,
+                Math.Round(a.Produto.QtdMes, 2), Math.Round(a.Produto.PrecoAtual * a.Produto.QtdMes, 2)]));
+        await JS.InvokeVoidAsync("portal.baixarArquivo", $"precificacao-{cliente.Nome}-{DateTime.Now:yyyyMMdd}.xlsx", Convert.ToBase64String(bytes),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    }
+}

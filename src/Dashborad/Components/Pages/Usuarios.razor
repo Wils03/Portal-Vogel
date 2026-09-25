@@ -1,0 +1,320 @@
+@page "/usuarios"
+@attribute [Authorize(Roles = Perfis.GerenciamUsuarios)]
+@using Microsoft.AspNetCore.Identity
+@inject UserManager<ApplicationUser> Gerenciador
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject AcessoService Acessos
+
+<PageTitle>Usuários · Vogel</PageTitle>
+
+<div class="cabecalho-pagina">
+    <h1>Usuários@(acesso.EhCliente ? $" · {acesso.ClienteNome}" : "")</h1>
+    @if (acesso.GerenciaUsuarios)
+    {
+        <button class="btn btn-primary" @onclick="Novo"><i class="bi bi-person-plus"></i> Novo usuário</button>
+    }
+</div>
+
+@if (!acesso.GerenciaUsuarios)
+{
+    <div class="cartao text-muted">Seu perfil não cadastra usuários.</div>
+    return;
+}
+
+@if (editando is not null)
+{
+    <div class="cartao">
+        <h2 class="h5">@(editando.Id is null ? "Novo usuário" : $"Editar: {editando.Email}")</h2>
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Nome</label>
+                <input class="form-control" @bind="editando.Nome" maxlength="100" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label"><span class="dica" title="É o login do usuário.">E-mail</span></label>
+                <input class="form-control" type="email" @bind="editando.Email" disabled="@(editando.Id is not null)" autocomplete="off" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label"><span class="dica" title="Define o que o usuário vê e pode fazer. Passe o mouse nas opções abaixo para ver o resumo.">Perfil</span></label>
+                <select class="form-select" @bind="editando.Perfil">
+                    @foreach (var p in acesso.PerfisQuePodeAtribuir) { <option value="@p" title="@Perfis.Descricao(p)">@Perfis.Texto(p)</option> }
+                </select>
+                <div class="form-text">@Perfis.Descricao(editando.Perfil)</div>
+            </div>
+            @if (Perfis.EhCliente(editando.Perfil))
+            {
+                <div class="col-md-4">
+                    <label class="form-label"><span class="dica" title="O usuário só vê os dados desta empresa.">Empresa</span></label>
+                    @if (acesso.EhAdministrador)
+                    {
+                        <select class="form-select" @bind="editando.ClienteId">
+                            <option value="0">Escolha a empresa</option>
+                            @foreach (var c in clientes) { <option value="@c.Id">@c.Nome</option> }
+                        </select>
+                    }
+                    else
+                    {
+                        <input class="form-control" value="@acesso.ClienteNome" disabled />
+                    }
+                </div>
+            }
+            @if (editando.Id is null)
+            {
+                <div class="col-md-4">
+                    <label class="form-label"><span class="dica" title="Mínimo de 6 caracteres. Passe a senha ao usuário por um canal seguro e peça para trocá-la em 'Minha conta'.">Senha inicial</span></label>
+                    <input class="form-control" type="password" @bind="editando.Senha" autocomplete="new-password" />
+                </div>
+            }
+            <div class="col-12 d-flex gap-2 align-items-center">
+                <button class="btn btn-primary" @onclick="Salvar" disabled="@ocupado"><i class="bi bi-save"></i> Salvar</button>
+                <button class="btn btn-outline-secondary" @onclick="() => editando = null">Cancelar</button>
+                @if (erro is not null) { <span class="small negativo">@erro</span> }
+            </div>
+        </div>
+    </div>
+}
+
+@if (trocandoSenha is not null)
+{
+    <div class="cartao">
+        <h2 class="h5">Nova senha: @trocandoSenha.Email</h2>
+        <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small">Nova senha</label>
+                <input class="form-control" type="password" @bind="novaSenha" autocomplete="new-password" />
+            </div>
+            <div class="col-md-8 d-flex gap-2 align-items-center">
+                <button class="btn btn-primary" @onclick="TrocarSenha" disabled="@ocupado">Definir senha</button>
+                <button class="btn btn-outline-secondary" @onclick="() => trocandoSenha = null">Cancelar</button>
+                @if (erro is not null) { <span class="small negativo">@erro</span> }
+            </div>
+        </div>
+        <div class="form-text">O usuário é desconectado e entra com a senha nova.</div>
+    </div>
+}
+
+@if (aviso is not null) { <div class="alert alert-success small">@aviso</div> }
+@if (erro is not null && editando is null && trocandoSenha is null) { <div class="alert alert-danger small">@erro</div> }
+
+<div class="cartao">
+    <div class="table-wrap">
+        <table class="table table-hover align-middle m-0">
+            <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th>@if (acesso.EhAdministrador) { <th>Empresa</th> }<th>Situação</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var u in lista)
+                {
+                    var desativado = u.LockoutEnd is { } f && f > DateTimeOffset.UtcNow;
+                    <tr class="@(desativado ? "text-muted" : "")">
+                        <td>@u.Nome</td>
+                        <td>@u.Email</td>
+                        <td><span title="@Perfis.Descricao(u.Perfil)">@Perfis.Texto(u.Perfil)</span></td>
+                        @if (acesso.EhAdministrador) { <td>@(u.ClienteId is int cid ? nomes.GetValueOrDefault(cid, "(empresa removida)") : "Vogel")</td> }
+                        <td>
+                            @if (!desativado) { <span class="selo selo-Resolvido">Ativo</span> }
+                            else if (u.LockoutEnd!.Value.Year >= 9999) { <span class="selo selo-Erro">Desativado</span> }
+                            else { <span class="selo selo-Atencao" title="Errou a senha várias vezes.">Bloqueado até @u.LockoutEnd.Value.ToLocalTime().ToString("HH:mm")</span> }
+                        </td>
+                        <td class="text-end text-nowrap">
+                            @if (u.Id == acesso.UsuarioId)
+                            {
+                                <a class="btn btn-sm btn-outline-secondary" href="Account/Manage">Minha conta</a>
+                            }
+                            else if (acesso.PodeGerenciar(u))
+                            {
+                                <button class="btn btn-sm btn-outline-primary" @onclick="() => Editar(u)">Editar</button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => AbrirSenha(u)"><i class="bi bi-key"></i> Senha</button>
+                                @if (desativado)
+                                {
+                                    <button class="btn btn-sm btn-outline-success" @onclick="() => Reativar(u)">Reativar</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => Desativar(u)">Desativar</button>
+                                }
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="small text-muted mt-2">
+        Usuário desativado não entra mais e é desconectado em até 5 minutos. Não há exclusão: o histórico continua com o nome de quem fez cada ação.
+    </div>
+</div>
+
+@code {
+    private sealed class Formulario
+    {
+        public string? Id { get; set; }
+        public string? Nome { get; set; }
+        public string Email { get; set; } = "";
+        public Perfil Perfil { get; set; }
+        public int ClienteId { get; set; }
+        public string? Senha { get; set; }
+    }
+
+    private Acesso acesso = Acesso.Nenhum;
+    private List<ApplicationUser> lista = [];
+    private List<Cliente> clientes = [];
+    private Dictionary<int, string> nomes = [];
+    private Formulario? editando;
+    private ApplicationUser? trocandoSenha;
+    private string? novaSenha, erro, aviso;
+    private bool ocupado;
+
+    protected override async Task OnInitializedAsync()
+    {
+        acesso = await Acessos.ObterAsync();
+        await Carregar();
+    }
+
+    private async Task Carregar()
+    {
+        if (!acesso.GerenciaUsuarios) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        clientes = await db.Clientes.AsNoTracking().Where(c => c.Ativo).OrderBy(c => c.Nome).ToListAsync();
+        nomes = await db.Clientes.AsNoTracking().ToDictionaryAsync(c => c.Id, c => c.Nome);
+        var q = db.Users.AsNoTracking();
+        // Gestor do cliente só enxerga os usuários da própria empresa
+        if (!acesso.EhAdministrador)
+            q = q.Where(u => u.ClienteId == acesso.ClienteId && (u.Perfil == Perfil.ClienteGestor || u.Perfil == Perfil.ClienteUsuario));
+        lista = (await q.ToListAsync()).OrderBy(u => u.ClienteId ?? 0).ThenBy(u => u.Nome ?? u.Email).ToList();
+    }
+
+    private void Limpar() { erro = aviso = null; trocandoSenha = null; editando = null; }
+
+    private void Novo()
+    {
+        Limpar();
+        editando = new Formulario
+        {
+            Perfil = Perfil.ClienteUsuario,
+            ClienteId = acesso.EhCliente ? acesso.ClienteId!.Value : 0
+        };
+    }
+
+    private void Editar(ApplicationUser u)
+    {
+        if (!acesso.PodeGerenciar(u)) return;
+        Limpar();
+        editando = new Formulario { Id = u.Id, Nome = u.Nome, Email = u.Email ?? "", Perfil = u.Perfil, ClienteId = u.ClienteId ?? 0 };
+    }
+
+    private void AbrirSenha(ApplicationUser u)
+    {
+        if (!acesso.PodeGerenciar(u)) return;
+        Limpar();
+        trocandoSenha = u;
+        novaSenha = null;
+    }
+
+    /// <summary>Não deixa o portal ficar sem nenhum administrador ativo.</summary>
+    private async Task<bool> UltimoAdministrador(string usuarioId)
+    {
+        await using var db = await Fabrica.CreateDbContextAsync();
+        var agora = DateTimeOffset.UtcNow;
+        var ativos = (await db.Users.AsNoTracking().Where(u => u.Perfil == Perfil.VogelAdministrador).ToListAsync())
+            .Where(u => u.LockoutEnd is null || u.LockoutEnd <= agora).Select(u => u.Id).ToList();
+        return ativos.Count == 1 && ativos[0] == usuarioId;
+    }
+
+    private async Task Salvar()
+    {
+        if (editando is null) return;
+        erro = aviso = null;
+        acesso = await Acessos.ObterAsync();
+        if (!acesso.PerfisQuePodeAtribuir.Contains(editando.Perfil)) { erro = "Perfil não permitido."; return; }
+
+        int? clienteId = null;
+        if (Perfis.EhCliente(editando.Perfil))
+        {
+            clienteId = acesso.EhAdministrador ? editando.ClienteId : acesso.ClienteId;
+            if (clienteId is null or 0 || clientes.All(c => c.Id != clienteId)) { erro = "Escolha a empresa do usuário."; return; }
+        }
+
+        ocupado = true;
+        try
+        {
+            if (editando.Id is null)
+            {
+                if (string.IsNullOrWhiteSpace(editando.Email)) { erro = "Informe o e-mail."; return; }
+                var novo = new ApplicationUser
+                {
+                    UserName = editando.Email.Trim(), Email = editando.Email.Trim(), EmailConfirmed = true,
+                    Nome = editando.Nome?.Trim(), Perfil = editando.Perfil, ClienteId = clienteId
+                };
+                var r = await Gerenciador.CreateAsync(novo, editando.Senha ?? "");
+                if (!r.Succeeded) { erro = string.Join(" ", r.Errors.Select(e => e.Description)); return; }
+                aviso = $"Usuário {novo.Email} criado. Passe a senha inicial por um canal seguro.";
+            }
+            else
+            {
+                var u = await Gerenciador.FindByIdAsync(editando.Id);
+                if (u is null || !acesso.PodeGerenciar(u)) { erro = "Usuário não encontrado."; return; }
+                if (u.Perfil == Perfil.VogelAdministrador && editando.Perfil != Perfil.VogelAdministrador && await UltimoAdministrador(u.Id))
+                {
+                    erro = "Este é o único administrador ativo. Crie outro antes de mudar o perfil.";
+                    return;
+                }
+                var mudouAcesso = u.Perfil != editando.Perfil || u.ClienteId != clienteId;
+                u.Nome = editando.Nome?.Trim();
+                u.Perfil = editando.Perfil;
+                u.ClienteId = clienteId;
+                var r = await Gerenciador.UpdateAsync(u);
+                if (!r.Succeeded) { erro = string.Join(" ", r.Errors.Select(e => e.Description)); return; }
+                // Perfil ou empresa mudou: renova o login para valer já
+                if (mudouAcesso) await Gerenciador.UpdateSecurityStampAsync(u);
+                aviso = "Usuário atualizado.";
+            }
+            editando = null;
+            await Carregar();
+        }
+        finally { ocupado = false; }
+    }
+
+    private async Task TrocarSenha()
+    {
+        if (trocandoSenha is null) return;
+        erro = aviso = null;
+        ocupado = true;
+        try
+        {
+            var u = await Gerenciador.FindByIdAsync(trocandoSenha.Id);
+            if (u is null || !acesso.PodeGerenciar(u)) { erro = "Usuário não encontrado."; return; }
+            var token = await Gerenciador.GeneratePasswordResetTokenAsync(u);
+            var r = await Gerenciador.ResetPasswordAsync(u, token, novaSenha ?? "");
+            if (!r.Succeeded) { erro = string.Join(" ", r.Errors.Select(e => e.Description)); return; }
+            await Gerenciador.ResetAccessFailedCountAsync(u);
+            aviso = $"Senha de {u.Email} redefinida.";
+            trocandoSenha = null;
+            novaSenha = null;
+            await Carregar();
+        }
+        finally { ocupado = false; }
+    }
+
+    private async Task Desativar(ApplicationUser alvo)
+    {
+        Limpar();
+        var u = await Gerenciador.FindByIdAsync(alvo.Id);
+        if (u is null || !acesso.PodeGerenciar(u)) return;
+        if (u.Perfil == Perfil.VogelAdministrador && await UltimoAdministrador(u.Id)) { erro = "Não dá para desativar o único administrador ativo."; return; }
+        await Gerenciador.SetLockoutEnabledAsync(u, true);
+        await Gerenciador.SetLockoutEndDateAsync(u, DateTimeOffset.MaxValue);
+        await Gerenciador.UpdateSecurityStampAsync(u);
+        aviso = $"{u.Email} desativado.";
+        await Carregar();
+    }
+
+    private async Task Reativar(ApplicationUser alvo)
+    {
+        Limpar();
+        var u = await Gerenciador.FindByIdAsync(alvo.Id);
+        if (u is null || !acesso.PodeGerenciar(u)) return;
+        await Gerenciador.SetLockoutEndDateAsync(u, null);
+        await Gerenciador.ResetAccessFailedCountAsync(u);
+        aviso = $"{u.Email} reativado.";
+        await Carregar();
+    }
+}

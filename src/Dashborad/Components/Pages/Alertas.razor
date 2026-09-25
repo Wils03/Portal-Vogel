@@ -1,0 +1,211 @@
+@page "/alertas"
+@attribute [Authorize]
+@implements IDisposable
+@inject ClienteAtualService ClienteAtual
+@using System.Text.Json
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject MensagemService Mensageiro
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider Autenticacao
+@inject AcessoService Acessos
+
+<PageTitle>Alertas · Vogel</PageTitle>
+
+<div class="cabecalho-pagina">
+    <h1>Alertas</h1>
+    <div class="d-flex flex-wrap gap-2">
+        <select class="form-select w-auto" @bind="filtroStatus" @bind:after="Carregar">
+            <option value="abertos">Em aberto</option>
+            @foreach (var s in Enum.GetValues<StatusAlerta>()) { <option value="@s">@s</option> }
+            <option value="todos">Todos</option>
+        </select>
+        <button class="btn btn-outline-secondary" @onclick="Exportar"><i class="bi bi-file-earmark-excel"></i> Exportar</button>
+    </div>
+</div>
+
+@if (acesso.EnviaMensagens && Mensageiro.EnvioAutomatico && Mensageiro.ModoTeste)
+{
+    <div class="alert alert-warning small">
+        <strong>MODO TESTE:</strong>
+        @if (Mensageiro.NumeroTeste is null) { <span>sem número de teste configurado, nada é enviado pelo Pagebot.</span> }
+        else { <span>o botão "Enviar pelo Pagebot" manda para <strong>@Mensageiro.NumeroTeste</strong>, não para o cliente.</span> }
+    </div>
+}
+@if (acesso.EnviaMensagens && !Mensageiro.EnvioAutomatico)
+{
+    <div class="alert alert-info small">
+        Envio em modo <strong>manual</strong>: o botão abre o WhatsApp com a mensagem pronta. Para enviar direto (e automático) pelo Pagebot, configure o token do canal e o <code>Modo</code> na seção <code>Mensagens</code> (veja o README).
+    </div>
+}
+
+@if (selecionado is not null)
+{
+    <div class="cartao">
+        <div class="d-flex justify-content-between">
+            <h2 class="h5">@selecionado.Cliente?.Nome — @selecionado.Rotina?.Nome</h2>
+            <button class="btn-close" @onclick="() => selecionado = null"></button>
+        </div>
+        @if (selecionado.Erro is not null)
+        {
+            <div class="alert alert-danger">@TextoErro(selecionado)</div>
+        }
+        else if (!acesso.EnviaMensagens)
+        {
+            <div class="p-2 border rounded" style="white-space: pre-line">@selecionado.Mensagem</div>
+        }
+        else
+        {
+            <label class="form-label">Mensagem (pode editar antes de enviar)</label>
+            <textarea class="form-control mb-2" rows="4" @bind="textoMensagem" @bind:event="oninput"></textarea>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                @if (string.IsNullOrWhiteSpace(selecionado.Cliente?.WhatsApp))
+                {
+                    <button class="btn btn-whatsapp" disabled><i class="bi bi-whatsapp"></i> Enviar</button>
+                }
+                else if (Mensageiro.EnvioAutomatico)
+                {
+                    <button class="btn btn-whatsapp" @onclick="Enviar" disabled="@enviando"><i class="bi bi-whatsapp"></i> @(Mensageiro.ModoTeste ? "Enviar pelo Pagebot (teste)" : "Enviar pelo Pagebot")</button>
+                }
+                else
+                {
+                    <a class="btn btn-whatsapp" target="_blank" href="@MensagemService.LinkWhatsApp(selecionado.Cliente.WhatsApp, textoMensagem)" @onclick="Enviar">
+                        <i class="bi bi-whatsapp"></i> Abrir no WhatsApp
+                    </a>
+                }
+                @if (string.IsNullOrWhiteSpace(selecionado.Cliente?.WhatsApp)) { <span class="small negativo">Cliente sem WhatsApp cadastrado.</span> }
+                @if (retornoEnvio is not null) { <span class="small">@retornoEnvio</span> }
+            </div>
+        }
+        @if (detalhe is { Count: > 0 })
+        {
+            <h3 class="h6 mt-3">Amostra dos registros encontrados</h3>
+            <div class="table-wrap">
+                <table class="table table-sm table-bordered small">
+                    <thead><tr>@foreach (var k in detalhe[0].Keys) { <th>@k</th> }</tr></thead>
+                    <tbody>@foreach (var linha in detalhe) { <tr>@foreach (var v in linha.Values) { <td>@v</td> }</tr> }</tbody>
+                </table>
+            </div>
+        }
+    </div>
+}
+
+<div class="cartao">
+    <div class="table-wrap">
+        <table class="table table-hover align-middle m-0">
+            <thead><tr><th>Data</th><th>Cliente</th><th>Rotina</th><th class="num"><span class="dica" title="Quantidade de ocorrências encontradas pela rotina (ex.: notas pendentes).">Qtd.</span></th><th><span class="dica" title="Informativo, Atenção ou Crítico — definido na rotina.">Severidade</span></th><th><span class="dica" title="Novo: ainda não avisado · Notificado: mensagem enviada · Resolvido: tratado · Erro: a consulta falhou.">Status</span></th><th></th></tr></thead>
+            <tbody>
+                @foreach (var a in alertas)
+                {
+                    <tr>
+                        <td class="text-nowrap">@a.DataHora.ToString("dd/MM HH:mm")
+                            @if (a.AtualizadoEm is DateTime at && a.Status != StatusAlerta.Resolvido)
+                            {
+                                <div class="small text-muted" title="A rotina encontrou o problema de novo nesta data (sem reenviar mensagem).">verif. @at.ToString("dd/MM HH:mm")</div>
+                            }
+                            @if (a.ResolvidoEm is DateTime rs)
+                            {
+                                <div class="small text-muted">resolvido @rs.ToString("dd/MM HH:mm")</div>
+                            }
+                        </td>
+                        <td>@a.Cliente?.Nome</td>
+                        <td>@a.Rotina?.Nome</td>
+                        <td class="num">@(a.Status == StatusAlerta.Erro ? "—" : a.Quantidade.ToString("N0"))</td>
+                        <td><span class="selo selo-@a.Severidade">@Rotulos.Texto(a.Severidade)</span></td>
+                        <td><span class="selo selo-@a.Status">@a.Status</span></td>
+                        <td class="text-end text-nowrap">
+                            <button class="btn btn-sm btn-outline-primary" @onclick="() => Abrir(a)">Abrir</button>
+                            @if (acesso.Altera && a.Status != StatusAlerta.Resolvido)
+                            {
+                                <button class="btn btn-sm btn-outline-success" @onclick="() => Resolver(a)"><i class="bi bi-check2"></i> Resolvido</button>
+                            }
+                        </td>
+                    </tr>
+                }
+                @if (alertas.Count == 0) { <tr><td colspan="7" class="text-muted">Nenhum alerta para o filtro.</td></tr> }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private List<Alerta> alertas = [];
+    private List<Cliente> clientes = [];
+    private string filtroStatus = "abertos";
+    private Alerta? selecionado;
+    private string textoMensagem = "";
+    private string? retornoEnvio;
+    private bool enviando;
+    private List<Dictionary<string, string?>>? detalhe;
+    private Acesso acesso = Acesso.Nenhum;
+
+    // O cliente não vê o erro técnico da consulta (nome de servidor, SQL...)
+    private string? TextoErro(Alerta a) => acesso.EhVogel ? a.Erro : "Não foi possível fazer esta verificação. A equipe Vogel já foi avisada.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        acesso = await Acessos.ObterAsync();
+        await using var db = await Fabrica.CreateDbContextAsync();
+        clientes = await acesso.Filtrar(db.Clientes).AsNoTracking().OrderBy(c => c.Nome).ToListAsync();
+        ClienteAtual.Mudou += AoMudarCliente;
+        await Carregar();
+    }
+
+    private Task AoMudarCliente() => InvokeAsync(async () => { selecionado = null; await Carregar(); StateHasChanged(); });
+
+    public void Dispose() => ClienteAtual.Mudou -= AoMudarCliente;
+
+    private async Task Carregar()
+    {
+        await using var db = await Fabrica.CreateDbContextAsync();
+        var q = acesso.Filtrar(db.Alertas).AsNoTracking().Include(a => a.Cliente).Include(a => a.Rotina).AsQueryable();
+        q = filtroStatus switch
+        {
+            "abertos" => q.Where(a => a.Status == StatusAlerta.Novo || a.Status == StatusAlerta.Notificado || a.Status == StatusAlerta.Erro),
+            "todos" => q,
+            _ => Enum.TryParse<StatusAlerta>(filtroStatus, out var s) ? q.Where(a => a.Status == s) : q
+        };
+        if (ClienteAtual.Filtro is int foco) q = q.Where(a => a.ClienteId == foco); // cliente escolhido no topo
+        alertas = await q.OrderByDescending(a => a.DataHora).Take(500).ToListAsync();
+    }
+
+    private void Abrir(Alerta a)
+    {
+        selecionado = a;
+        textoMensagem = a.Mensagem;
+        retornoEnvio = null;
+        detalhe = string.IsNullOrEmpty(a.DetalheJson) ? null
+            : JsonSerializer.Deserialize<List<Dictionary<string, string?>>>(a.DetalheJson);
+    }
+
+    private async Task Enviar()
+    {
+        if (selecionado?.Cliente is null || !acesso.EnviaMensagens) return;
+        enviando = true;
+        try
+        {
+            var usuario = (await Autenticacao.GetAuthenticationStateAsync()).User.Identity?.Name;
+            var r = await Mensageiro.EnviarAsync(selecionado.Cliente, textoMensagem, selecionado.Id, usuario);
+            retornoEnvio = r.Sucesso ? (r.LinkManual is null ? "Mensagem enviada." : "Mensagem registrada; confirme o envio no WhatsApp.") : $"Não enviou: {MensagemService.ExplicarRetorno(r.Retorno)}";
+            await Carregar();
+        }
+        finally { enviando = false; }
+    }
+
+    private async Task Resolver(Alerta a)
+    {
+        if (!acesso.Altera) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        await acesso.Filtrar(db.Alertas).Where(x => x.Id == a.Id).ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, StatusAlerta.Resolvido));
+        if (selecionado?.Id == a.Id) selecionado = null;
+        await Carregar();
+    }
+
+    private async Task Exportar()
+    {
+        var bytes = Planilhas.GerarXlsx("Alertas",
+            ["Data", "Cliente", "Rotina", "Quantidade", "Severidade", "Status", "Mensagem", "Erro"],
+            alertas.Select(a => (IReadOnlyList<object?>)[a.DataHora, a.Cliente?.Nome, a.Rotina?.Nome, a.Quantidade, a.Severidade.ToString(), a.Status.ToString(), a.Mensagem, a.Erro is null ? null : TextoErro(a)]));
+        await JS.InvokeVoidAsync("portal.baixarArquivo", $"alertas-{DateTime.Now:yyyyMMdd-HHmm}.xlsx", Convert.ToBase64String(bytes),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    }
+}

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>aspnet-Portal-88071aae-12a8-49ba-9a46-9bdd04908add</UserSecretsId>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Services\ModeloDreSqlServer.sql" LogicalName="ModeloDreSqlServer.sql" />
+    <EmbeddedResource Include="Services\ModeloPrecificacaoSqlServer.sql" LogicalName="ModeloPrecificacaoSqlServer.sql" />
+    <EmbeddedResource Include="Services\ModeloDreBaseLv.sql" LogicalName="ModeloDreBaseLv.sql" />
+    <EmbeddedResource Include="Services\ModeloPrecificacaoBaseLv.sql" LogicalName="ModeloPrecificacaoBaseLv.sql" />
+    <EmbeddedResource Include="Services\ModeloComercialSqlServer.sql" LogicalName="ModeloComercialSqlServer.sql" />
+    <EmbeddedResource Include="Services\ModeloComercialBaseLv.sql" LogicalName="ModeloComercialBaseLv.sql" />
+    <EmbeddedResource Include="Services\ModeloFeriadosSqlServer.sql" LogicalName="ModeloFeriadosSqlServer.sql" />
+    <EmbeddedResource Include="Services\ModeloFeriadosBaseLv.sql" LogicalName="ModeloFeriadosBaseLv.sql" />
+    <EmbeddedResource Include="Services\ModeloCotasSqlServer.sql" LogicalName="ModeloCotasSqlServer.sql" />
+    <EmbeddedResource Include="Services\ModeloCotasBaseLv.sql" LogicalName="ModeloCotasBaseLv.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.105.1" />
+    <PackageReference Include="FirebirdSql.Data.FirebirdClient" Version="10.3.4" />
+    <PackageReference Include="Microsoft.AspNetCore.Diagnostics.EntityFrameworkCore" Version="10.0.11" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.11" />
+    <PackageReference Include="MySqlConnector" Version="2.6.2" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+
+</Project>
