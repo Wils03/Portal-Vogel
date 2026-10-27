@@ -35,7 +35,7 @@ Um portal web (C# / ASP.NET Core Blazor) onde a Vogel:
 ## Etapa 2 — Conectar com a realidade (próximo passo)
 
 - [x] Banco dos clientes: **SQL Server** (base de teste `BASE`, compatibilidade 100). Tabelas mapeadas: `Nfe_download`, `Nfe_status`, `Documentos Fiscais`, `Entradas`, `Log de whatsapp`
-- [ ] Criar um **usuário somente leitura** em cada banco de cliente para o portal (hoje o teste usa `sa`) → script pronto: login `vogel_portal` em [docs/implantacao/02-criar-logins.sql](docs/implantacao/02-criar-logins.sql); falta aplicar no cliente piloto
+- [ ] Criar um **usuário somente leitura** em cada banco de cliente para o portal (hoje o teste usa a padrão) → script pronto: login `vogel_portal` em [docs/implantacao/02-criar-logins.sql](docs/implantacao/02-criar-logins.sql); falta aplicar no cliente piloto
 - [x] SQL das rotinas de notas (não lançadas, rejeitadas, aguardando SEFAZ, não transmitidas, WhatsApp do sistema) — ver `docs/rotinas-sqlserver.sql`
 - [ ] Validar com um cliente real (a base de teste só tem dados até 29/05/2025)
 - [x] DRE ligada ao banco (vendas, devoluções, CMV pelo custo, contas a pagar por centro de custo) + ponto de equilíbrio calculado pela DRE — ver `docs/dre-sqlserver.md`
