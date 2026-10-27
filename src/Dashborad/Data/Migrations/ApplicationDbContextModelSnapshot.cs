@@ -306,6 +306,40 @@ namespace Portal.Data.Migrations
                     b.ToTable("AspNetUsers", (string)null);
                 });
 
+            modelBuilder.Entity("Portal.Data.ClassificacaoContaDre", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("AtualizadoEm")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("AtualizadoPor")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int>("ClienteId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Conta")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<int>("Grupo")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClienteId", "Conta")
+                        .IsUnique();
+
+                    b.ToTable("ClassificacoesDre");
+                });
+
             modelBuilder.Entity("Portal.Data.Cliente", b =>
                 {
                     b.Property<int>("Id")
@@ -988,6 +1022,15 @@ namespace Portal.Data.Migrations
                     b.Navigation("Cliente");
 
                     b.Navigation("Rotina");
+                });
+
+            modelBuilder.Entity("Portal.Data.ClassificacaoContaDre", b =>
+                {
+                    b.HasOne("Portal.Data.Cliente", null)
+                        .WithMany()
+                        .HasForeignKey("ClienteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Portal.Data.DiasUteisMes", b =>

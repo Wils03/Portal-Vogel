@@ -20,11 +20,13 @@
         <span class="dica" title="Os dados vêm do sistema do cliente pela sincronização diária. Mais de 36 horas sem atualizar aparece como desatualizado.">Dados:</span>
         @if (acesso.VeDre) { @Dados("DRE", "dre", DataDosDados.Referencia(empresa.DreDadosDe, empresa.DreAtualizadoEm)) }
         @Dados("Precificação", "precificacao", DataDosDados.Referencia(empresa.PrecificacaoDadosDe, empresa.PrecificacaoAtualizadoEm))
+        @if (acesso.VeComercial && !string.IsNullOrWhiteSpace(empresa.SqlComercial)) { @Dados("Comercial", "comercial", DataDosDados.Referencia(empresa.ComercialDadosDe, empresa.ComercialAtualizadoEm)) }
         @if (acesso.AtualizaDoBanco && PedidoSincronizacao.Disponivel(empresa))
         {
-            <button class="btn btn-sm btn-outline-primary ms-3 py-0" @onclick="SincronizarAgora" disabled="@(pedindo || pedido?.EmAndamento == true)"
+            var aguardando = pedindo || (pedido is { EmAndamento: true } emCurso && !emCurso.SemResposta(DateTime.Now));
+            <button class="btn btn-sm btn-outline-primary ms-3 py-0" @onclick="SincronizarAgora" disabled="@aguardando"
                     title="Pede ao servidor do cliente para sincronizar agora (DRE, Precificação e rotinas). Ele confere os pedidos a cada 5 minutos.">
-                @if (pedindo || pedido?.EmAndamento == true) { <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> }
+                @if (aguardando) { <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> }
                 else { <i class="bi bi-arrow-repeat"></i> }
                 <span>Sincronizar agora</span>
             </button>
@@ -99,6 +101,40 @@
                         </div>
                     }
                     <div class="detalhe"><a href="dre">Ver a DRE</a></div>
+                </div>
+            </div>
+        }
+        @if (meta is not null)
+        {
+            var m = meta;
+            <div class="col-md-6 col-xl-3">
+                <div class="cartao kpi">
+                    <div class="rotulo"><span class="dica" title="Venda líquida do mês sem permutas ÷ meta (cotas de vendas do ERP ou metas do portal), igual à tela Comercial. Dias úteis como o ERP: sábado vale meio dia.">Meta de vendas · @NomeMes(m.Mes)</span>@(m.DiasUteisRestantes > 0 ? $" (até {m.DataFinal:dd/MM})" : "")</div>
+                    <div class="valor @(m.Atingimento >= 1 ? "positivo" : "")">@m.Atingimento.ToString("P0")</div>
+                    <div class="progress my-1" role="progressbar" aria-valuenow="@((int)Math.Min(m.Atingimento * 100, 100))" aria-valuemin="0" aria-valuemax="100" style="height: .6rem">
+                        <div class="progress-bar @(m.Atingimento >= 1 ? "bg-success" : "")" style="width: @(Math.Min(m.Atingimento * 100, 100).ToString("0", System.Globalization.CultureInfo.InvariantCulture))%"></div>
+                    </div>
+                    <div class="detalhe">Vendido @m.Venda.ToString("C0") de @m.Meta.ToString("C0")</div>
+                    @if (m.DiasUteisRestantes > 0)
+                    {
+                        <div class="detalhe">
+                            <span class="dica" title="Comparado com a meta proporcional aos dias úteis até @m.DataFinal.ToString("dd/MM") (@m.DiasUteisAcumulado de @m.DiasUteisMes): @m.MetaAcumulada.ToString("C0").">No ritmo da meta:</span>
+                            <strong class="@(m.Ritmo >= 0 ? "positivo" : "negativo")">@(m.Ritmo >= 0 ? "adiantado" : "atrasado") @Math.Abs(m.Ritmo).ToString("C0")</strong>
+                        </div>
+                        @if (m.FaltaPorDia is decimal porDia)
+                        {
+                            <div class="detalhe">Faltam @m.Falta.ToString("C0") em @m.DiasUteisRestantes dia(s) útil(eis): <strong>@porDia.ToString("C0")/dia</strong></div>
+                        }
+                        @if (m.Projecao is decimal projM)
+                        {
+                            <div class="detalhe"><span class="dica" title="Venda ÷ @m.DiasUteisAcumulado dias úteis × @m.DiasUteisMes dias úteis do mês.">Projeção:</span> @projM.ToString("C0") (<span class="@(projM >= m.Meta ? "positivo" : "negativo")">@((projM / m.Meta).ToString("P0")) da meta</span>)</div>
+                        }
+                    }
+                    else
+                    {
+                        <div class="detalhe"><strong class="@(m.Venda >= m.Meta ? "positivo" : "negativo")">@(m.Venda >= m.Meta ? "Meta batida" : "Meta não batida"): @((m.Venda - m.Meta).ToString("C0"))</strong></div>
+                    }
+                    <div class="detalhe">@m.VendedoresNaMeta de @m.VendedoresComMeta vendedor(es) no ritmo da meta · <a href="comercial">Ver metas</a></div>
                 </div>
             </div>
         }
@@ -290,6 +326,7 @@ else if (acesso.EhVogel && empresas.Count > 0)
     private Cliente? empresa;
     private ResumoVendas? vendas;
     private ResumoPrecos? precos;
+    private ResumoMeta? meta;
 
     // "Sincronizar agora"
     private SituacaoPedido? pedido;
@@ -438,12 +475,17 @@ else if (acesso.EhVogel && empresas.Count > 0)
         empresa = null;
         vendas = null;
         precos = null;
+        meta = null;
         empresas = [];
         if (EmpresaFoco is int id)
         {
             var anterior = empresa?.Id;
             empresa = await acesso.Filtrar(db.Clientes).AsNoTracking().FirstOrDefaultAsync(c => c.Id == id);
-            if (empresa is not null) (vendas, precos) = await ResumirAsync(db, empresa);
+            if (empresa is not null)
+            {
+                (vendas, precos) = await ResumirAsync(db, empresa);
+                if (acesso.VeComercial) meta = await ResumoMeta.CarregarAsync(db, empresa.Id, DateOnly.FromDateTime(DateTime.Today));
+            }
             if (empresa is not null && anterior != empresa.Id)
             {
                 pedido = null;
@@ -478,8 +520,7 @@ else if (acesso.EhVogel && empresas.Count > 0)
             if (ultimo is DateOnly fim)
             {
                 var inicio = fim.AddMonths(-13);
-                var lancamentos = await db.LancamentosDre.AsNoTracking()
-                    .Where(l => l.ClienteId == c.Id && l.Competencia >= inicio && l.Competencia <= fim).ToListAsync();
+                var lancamentos = await DreDados.CarregarAsync(db, c.Id, inicio, fim);
                 v = PainelResumo.Resumir(lancamentos, DataDosDados.Referencia(c.DreDadosDe, c.DreAtualizadoEm));
             }
         }

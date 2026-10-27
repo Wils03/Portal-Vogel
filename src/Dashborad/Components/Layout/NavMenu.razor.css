@@ -131,3 +131,14 @@
         overflow-y: auto;
     }
 }
+
+/* Título de cada área do menu (Comercial, Financeiro, Gestão...) */
+.nav-secao {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding-top: 0.9rem;
+    padding-bottom: 0.25rem;
+}

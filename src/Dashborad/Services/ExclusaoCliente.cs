@@ -30,6 +30,7 @@ public static class ExclusaoCliente
 
         await db.Produtos.Where(p => p.ClienteId == clienteId).ExecuteDeleteAsync();
         await db.LancamentosDre.Where(l => l.ClienteId == clienteId).ExecuteDeleteAsync();
+        await db.ClassificacoesDre.Where(c => c.ClienteId == clienteId).ExecuteDeleteAsync();
         await db.VendasVendedores.Where(v => v.ClienteId == clienteId).ExecuteDeleteAsync();
         await db.MetasVendedores.Where(m => m.ClienteId == clienteId).ExecuteDeleteAsync();
         await db.Feriados.Where(f => f.ClienteId == clienteId).ExecuteDeleteAsync();

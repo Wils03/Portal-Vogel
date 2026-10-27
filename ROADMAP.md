@@ -120,7 +120,16 @@ Tudo a partir da **base de dados de cada cliente**, apresentado de forma acessí
   - CMV pelo "Custo total", como o ERP;
   - dados por dia e vendedor. Conferido na base de teste: venda, CMV e número de vendas iguais aos das tabelas do ERP.
 - [x] Comercial: interruptor "Desconsiderar permutas" (padrão ligado). A permuta vem separada (coluna `Permuta` na `LV_Comercial`); o relatório "Metas" do ERP tira a permuta no mês, mas não no ano anterior. Aparece quem tem meta ou vendeu no mês; totais somam todos
-- [ ] Comercial: meta no Painel; curva ABC de clientes e produtos; comparação com o mesmo mês do ano anterior por vendedor; conferir no cliente piloto com o relatório "Metas" do ERP
+- [x] **Menu por áreas** (Comercial, Financeiro, Gestão, Acompanhamento, Administração) e **sub-abas** em cada área; as que ainda não existem aparecem como "em breve" (Vendas, Curva ABC, Fluxo de caixa, Contas a receber e a pagar, Rentabilidade, Projeção)
+- [x] **DRE gerencial completa**: venda líquida → receita líquida → lucro bruto → despesas variáveis → margem de contribuição → despesas fixas → EBITDA → depreciação → resultado operacional → financeiro → IR → lucro líquido; margens bruta, de contribuição, operacional (EBITDA) e líquida (sobre a receita bruta); visão "Mês a mês" e "Comparativo" (mês, mês anterior, mesmo mês do ano anterior, acumulados, AV% e variação); contas abertas por linha; gráfico de margens
+- [x] "Classificar despesas" na DRE: cada conta como fixa, variável ou depreciação (sugestão pelo nome: comissões, taxas de cartão, fretes, depreciação); vale para a DRE, o ponto de equilíbrio e o Painel
+- [x] Ponto de equilíbrio em página própria (área Gestão), com as despesas variáveis na margem de contribuição
+- [x] **Projeção** (área Gestão): ano realizado + projetado pela sazonalidade do ano anterior × crescimento do ano; cenários pessimista/base/otimista; simulador "e se" (preço, volume, CMV, despesas fixas)
+- [x] README da raiz com fluxo dos dados, arquivos, tabelas do ERP lidas, views usadas só como referência, tabelas da BASELV e do PORTAL_VG
+- [ ] Revisar com o cliente a classificação das despesas do MC (72 contas em 2026)
+- [ ] ~~Capital de giro (PMR, PME, PMP, ciclo de caixa)~~: deixado de lado por decisão do usuário (27/10/2026)
+- [x] Painel: cartão "Meta de vendas" (atingimento, ritmo pelos dias úteis, quanto falta por dia, projeção, vendedores no ritmo; sem permutas)
+- [ ] Comercial: curva ABC de clientes e produtos; comparação com o mesmo mês do ano anterior por vendedor; conferir no cliente piloto com o relatório "Metas" do ERP
 - [x] **Tela Comercial (indicadores de gestão comercial)** (primeira versão feita: ver "Módulo Comercial" acima) — mesmo esquema da DRE: SQL cadastrado pela Vogel, resultado guardado no portal, gestor atualiza, cliente só consulta
   - Vendas: faturamento (mês, ano anterior, acumulado), ticket médio, nº de vendas, vendas por vendedor/filial/dia da semana — `Documentos Fiscais` + itens
   - Rentabilidade: margem bruta por produto/grupo/vendedor, desconto médio concedido, curva ABC — itens × custo (já usado na DRE e na precificação)

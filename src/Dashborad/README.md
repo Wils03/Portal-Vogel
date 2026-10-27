@@ -1,8 +1,8 @@
 # Portal Vogel
 
-Portal web (ASP.NET Core Blazor Server, .NET 10) para monitorar os bancos dos clientes, gerar alertas, enviar mensagens de WhatsApp, precificar produtos e acompanhar a DRE.
+Portal web (ASP.NET Core Blazor Server, .NET 10) para monitorar os bancos dos clientes, gerar alertas, enviar mensagens de WhatsApp, precificar produtos, acompanhar metas, DRE, ponto de equilíbrio e projeção.
 
-Etapas e ideias: [`ROADMAP.md`](../../ROADMAP.md).
+Visão geral do projeto, fluxo dos dados e **tabelas/SQLs necessários**: [`README.md` da raiz](../../README.md). Etapas e ideias: [`ROADMAP.md`](../../ROADMAP.md).
 
 ## Executar
 
@@ -20,7 +20,12 @@ Abra http://localhost:5250. As tabelas são criadas sozinhas (migrations). O **p
 
 Ferramentas de linha de comando:
 - `dotnet run -- --consulta <id do cliente> arquivo.sql` — conferência só de leitura no banco de um cliente, com a conexão salva (sem expor a senha).
+- `dotnet run -- --painel <id do cliente>` — números do Painel, da DRE (margens) e da projeção, só totais.
+- `dotnet run -- --importar-baselv [id] [--ano N]` — força a importação da BASELV (todos os clientes ou um; `--ano` traz também o Comercial de outro ano).
+- `dotnet run -- --exportar-rotinas <pasta>` — grava os SQLs das rotinas para o pacote do SincronizadorLV.
 - `dotnet run -- --copiar-sqlite Data/app.db` — cópia única do banco antigo (SQLite) para o PORTAL_VG, com o destino vazio.
+
+As ferramentas rodam antes das migrations: depois de criar uma migration nova, rode `dotnet ef database update` (ou abra o portal uma vez).
 
 ## Validar
 
@@ -30,15 +35,20 @@ dotnet run -- --self-test
 
 ## Módulos
 
-| Menu | O que faz |
+O menu é dividido em áreas; cada área tem sub-abas no alto da página (`Components/Layout/SubAbas.razor`). Sub-abas ainda não feitas aparecem como "em breve".
+
+| Área · tela | O que faz |
 |---|---|
-| Painel | Alertas em aberto, falhas, clientes com mais pendências, rotinas |
-| Clientes | Cadastro, WhatsApp, tipo de banco, string de conexão (criptografada) e parâmetros de precificação |
-| Rotinas | SELECT executado em cada cliente; gera alerta quando o resultado passa do limite. Roda no horário configurado ou em *Executar agora* |
-| Alertas | Revisar, editar a mensagem, enviar por WhatsApp/Pagebot, marcar como resolvido, exportar Excel |
-| Precificação | Markup, preço sugerido, margem de contribuição e ponto de equilíbrio. Importa CSV/XLSX ou SQL |
-| DRE | DRE mensal com AV%, gráfico e KPIs. Importa CSV/XLSX (baixe o modelo) ou SQL |
-| Mensagens | Histórico de envios |
+| **Painel** | Venda do mês (projeção, comparações), meta de vendas (atingimento, ritmo pelos dias úteis, quanto falta por dia), ponto de equilíbrio, margem bruta e resultado, preços que precisam de atenção, alertas e rotinas. Botão "Sincronizar agora" |
+| **Comercial · Metas por vendedor** (`/comercial`) | Igual ao relatório "Metas" do ERP: Diário, Acumulado, Ano anterior e Meta geral por vendedor; metas das cotas do ERP (ou digitadas); dias úteis com sábado = ½; interruptor "Desconsiderar permutas" |
+| **Comercial · Precificação** (`/precificacao`) | Markup, preço sugerido, margem de contribuição, preços abaixo da regra do ERP. Importa CSV/XLSX, SQL ou BASELV |
+| **Financeiro · DRE** (`/dre`) | DRE gerencial: venda líquida → receita líquida → lucro bruto → despesas variáveis → margem de contribuição → despesas fixas → EBITDA → depreciação → resultado operacional → financeiro → IR → lucro líquido. Margens (sobre a receita bruta), visão "Mês a mês" e "Comparativo" (mês anterior, mesmo mês do ano anterior, acumulados, AV% e variação), contas abertas por linha, gráficos. "Classificar despesas": cada conta como fixa, variável ou depreciação (tabela `ClassificacoesDre`) |
+| **Gestão · Ponto de equilíbrio** (`/ponto-equilibrio`) | Faturamento mínimo por mês, margem de segurança (ou quanto falta para o equilíbrio), escolha dos meses da média, "Usar na precificação" |
+| **Gestão · Projeção** (`/projecao`) | Ano realizado + projetado (mesmo mês do ano anterior × crescimento do ano), cenários pessimista/base/otimista e simulador "e se" (preço, volume, CMV, despesas fixas) |
+| **Acompanhamento · Alertas** | Revisar, editar a mensagem, enviar por WhatsApp/Pagebot, marcar como resolvido, exportar Excel |
+| **Acompanhamento · Mensagens** | Histórico de envios e simulação das proteções |
+| **Acompanhamento · Rotinas** | SELECT executado em cada cliente; gera alerta quando o resultado passa do limite. Roda no horário configurado ou em *Executar agora*; ou lê o resultado da BASELV ("Rotinas e alertas pela BASELV") |
+| **Administração** | Clientes (cadastro, conexão criptografada, SQLs, parâmetros), Configurações (Pagebot), Usuários |
 
 ### Rotinas
 
@@ -92,7 +102,7 @@ Se o canal do Pagebot for **WhatsApp Cloud (API oficial)**, o WhatsApp só aceit
 ### Importação de planilhas
 
 - Produtos: `Codigo; Descricao; Custo; Preco; QtdMes`
-- DRE: `Competencia (mm/aaaa); Grupo; Conta; Valor` com grupos `ReceitaBruta, Deducoes, Cmv, DespesasOperacionais, ReceitasFinanceiras, DespesasFinanceiras, ImpostosSobreLucro`
+- DRE: `Competencia (mm/aaaa); Grupo; Conta; Valor` com grupos `ReceitaBruta, Deducoes, Cmv, DespesasVariaveis, DespesasOperacionais` (fixas), `Depreciacao, ReceitasFinanceiras, DespesasFinanceiras, ImpostosSobreLucro`. Devoluções ficam em `Deducoes` com conta "Devoluções de vendas"
 
 CSV aceita `;` ou `,` e números no formato brasileiro (`1.234,56`).
 

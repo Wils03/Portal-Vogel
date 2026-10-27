@@ -57,6 +57,7 @@ public static class AutoTeste
             ModelosSql.AplicarFilial(ModelosSql.PrecificacaoSqlServer, 1))));
 
         // DRE
+        LancamentoDre L0(GrupoDre g, decimal v, string conta) => new() { Competencia = new DateOnly(2026, 1, 1), Grupo = g, Conta = conta, Valor = v };
         var dre = Dre.Montar(
         [
             new LancamentoDre { Competencia = new DateOnly(2026, 1, 1), Grupo = GrupoDre.ReceitaBruta, Valor = 1000 },
@@ -77,6 +78,51 @@ public static class AutoTeste
             && dreDev.Single(l => l.Titulo == Dre.VendaLiquida).Meses[7] == 2055054.79m
             && dreDev.Single(l => l.Titulo == Dre.ImpostosVenda).Meses[7] == 44599.79m
             && dreDev.Single(l => l.Titulo == "= Receita líquida").Meses[7] == 2117855.51m - 62800.72m - 44599.79m);
+        var dreNova = Dre.Montar(Dre.Classificar(
+        [
+            L0(GrupoDre.ReceitaBruta, 1000, "Vendas"), L0(GrupoDre.Deducoes, 100, "ICMS"), L0(GrupoDre.Cmv, 500, "CMV"),
+            L0(GrupoDre.DespesasOperacionais, 50, "Comissões de vendedores"), L0(GrupoDre.DespesasOperacionais, 30, "Taxas de cartão"),
+            L0(GrupoDre.DespesasOperacionais, 200, "Aluguel"), L0(GrupoDre.DespesasOperacionais, 20, "Depreciação"),
+            L0(GrupoDre.DespesasOperacionais, 40, "Fretes sobre vendas"), L0(GrupoDre.DespesasFinanceiras, 10, "Juros"),
+        ], new Dictionary<string, GrupoDre> { ["Fretes sobre vendas"] = GrupoDre.DespesasOperacionais }));
+        decimal Jan(string titulo) => dreNova.Single(l => l.Titulo == titulo).Meses[0];
+        Checar("DRE nova: comissões e taxas de cartão viram variáveis pelo nome; frete marcado como fixo fica fixo; depreciação em linha própria",
+            Jan(Dre.Nomes[GrupoDre.DespesasVariaveis]) == 80m && Jan(Dre.Nomes[GrupoDre.DespesasOperacionais]) == 240m && Jan(Dre.Nomes[GrupoDre.Depreciacao]) == 20m);
+        Checar("DRE nova: lucro bruto 400 → margem de contribuição 320 → EBITDA 80 → resultado operacional 60 → lucro líquido 50",
+            Jan(Dre.LucroBruto) == 400m && Jan(Dre.MargemContribuicao) == 320m && Jan(Dre.Ebitda) == 80m && Jan(Dre.ResultadoOperacional) == 60m && Jan(Dre.LucroLiquido) == 50m);
+        var peVar = Dre.PontoEquilibrio(Dre.Classificar(
+            [L0(GrupoDre.ReceitaBruta, 1000, "Vendas"), L0(GrupoDre.Deducoes, 100, "ICMS"), L0(GrupoDre.Cmv, 500, "CMV"),
+             L0(GrupoDre.DespesasOperacionais, 100, "Comissões"), L0(GrupoDre.DespesasOperacionais, 150, "Aluguel")], null));
+        Checar("PE com despesas variáveis: MC = 1 − 10% − 50% − 10% = 30%; fixos 150 → PE 500",
+            peVar is { MargemContribuicaoPct: 0.3m, DespesasVariaveisPct: 0.1m, CustosFixosMedios: 150m, PontoEquilibrio: 500m });
+
+        // Projeção: 2025 inteiro (receita 1000/mês, jul 2000) e 2026 até setembro com +10%; hoje = 15/10/2026
+        var lancProj = new List<LancamentoDre>();
+        void Mes(int a, int m, decimal receita)
+        {
+            var d = new DateOnly(a, m, 1);
+            lancProj.Add(new() { Competencia = d, Grupo = GrupoDre.ReceitaBruta, Conta = "Vendas", Valor = receita });
+            lancProj.Add(new() { Competencia = d, Grupo = GrupoDre.Deducoes, Conta = "ICMS", Valor = receita * 0.1m });
+            lancProj.Add(new() { Competencia = d, Grupo = GrupoDre.Cmv, Conta = "CMV", Valor = receita * 0.5m });
+            lancProj.Add(new() { Competencia = d, Grupo = GrupoDre.DespesasOperacionais, Conta = "Aluguel", Valor = 200 });
+        }
+        for (var m = 1; m <= 12; m++) Mes(2025, m, m == 7 ? 2000 : 1000);
+        for (var m = 1; m <= 9; m++) Mes(2026, m, m == 7 ? 2200 : 1100);
+        Mes(2026, 10, 300); // outubro em andamento: não entra no crescimento nem na estrutura
+        var proj = Projecao.Projetar(lancProj, 2026, new DateOnly(2026, 10, 15))!;
+        Checar("Projeção: crescimento dos meses fechados (+10%) aplicado ao mesmo mês do ano anterior; outubro em andamento é projetado (1100), com o parcial à parte",
+            Math.Round(proj.CrescimentoRealizado!.Value, 4) == 0.10m && proj.MesesRealizados == 9
+            && proj.Meses[9] is { Projetado: true, Receita: 1100m, ReceitaParcial: 300m } && proj.Receita == 1100m * 11 + 2200m);
+        Checar("Projeção: estrutura dos últimos 12 meses fechados (MC 40%, fixos 200) e lucro projetado = 1100 × 40% − 200 = 240",
+            proj.Estrutura is { Meses: 12, FixosMes: 200m } && proj.Estrutura.MargemContribuicaoPct == 0.4m && proj.Meses[11].LucroLiquido == 240m);
+        var otimista = Projecao.Projetar(lancProj, 2026, new DateOnly(2026, 10, 15), 0.05m)!;
+        Checar("Cenários: +5 p.p. só muda os meses que faltam (out–dez: 1000 × 1,15)", otimista.Meses[8].Receita == 1100m && otimista.Meses[11].Receita == 1150m);
+        var simHoje = Projecao.Simular(proj.Estrutura);
+        var simPreco = Projecao.Simular(proj.Estrutura, precoPct: 0.05m);
+        Checar("Simulador: +5% no preço sobe a receita 5%, o CMV não muda, e o ponto de equilíbrio cai",
+            simPreco.Receita == simHoje.Receita * 1.05m && simPreco.LucroBruto - simHoje.LucroBruto == simHoje.Receita * 0.05m * 0.9m
+            && simPreco.PontoEquilibrioMes < simHoje.PontoEquilibrioMes);
+
         // Ponto de equilíbrio pela DRE: receita 1000, deduções 100, CMV 500 => MC 40%; fixos 200 => PE 500
         var pe = Dre.PontoEquilibrio(
         [
@@ -195,6 +241,16 @@ public static class AutoTeste
         var semColuna = ImportacaoDados.VendasVendedores(new System.Data.DataView(tabelaComercial).ToTable(false, "Data", "Vendedor", "VendaBruta"), 1);
         Checar("Comercial: coluna Permuta separa as vendas em permuta; SQL antigo (sem a coluna) = tudo sem permuta",
             lidasComercial.Count(v => v.Permuta) == 1 && lidasComercial.Single(v => v.Permuta).VendaBruta == 100m && semColuna.All(v => !v.Permuta));
+        var resumoMeta = ResumoMeta.De(rel)!;
+        Checar("Painel: meta do mês = total do Comercial (5800 de 30000; ritmo = venda − meta acumulada; faltam 24200 em 14 dias úteis = 1728,57/dia; projeção 5800÷9×23)",
+            resumoMeta is { Venda: 5800m, Meta: 30000m, DiasUteisRestantes: 14, VendedoresComMeta: 2, VendedoresNaMeta: 0 }
+            && resumoMeta.Ritmo == 5800m - rel.Total.MetaAcumulada && Math.Round(resumoMeta.FaltaPorDia!.Value, 2) == 1728.57m
+            && Math.Round(resumoMeta.Projecao!.Value, 2) == 14822.22m
+            && ResumoMeta.De(ComercialResumo.Montar(d11, vendasMetas, [], feriadosTeste)) is null);
+        var pend = new SituacaoPedido(1, new DateTime(2026, 10, 27, 9, 16, 0), PedidoSincronizacao.Pendente, null, null, null);
+        Checar("Sincronizar agora: pedido pendente que uma sincronização feita depois dele já atendeu conta como concluído; sem ela, segue pendente e após 20 min fica 'sem resposta' (botão livre)",
+            PedidoSincronizacao.Atendido(pend, new DateTime(2026, 10, 27, 9, 18, 28)) is { Status: PedidoSincronizacao.Concluido, EmAndamento: false }
+            && PedidoSincronizacao.Atendido(pend, null).EmAndamento && !pend.SemResposta(pend.PedidoEm.AddMinutes(5)) && pend.SemResposta(pend.PedidoEm.AddMinutes(21)));
         var soComCota = ComercialResumo.Montar(d11, vendasMetas, metasTeste, feriadosTeste, somente: new HashSet<string> { "A" });
         Checar("Metas: filtro 'só quem tem meta no ERP' mostra só esses e os totais somam só eles",
             soComCota.Vendedores.Select(v => v.Vendedor).SequenceEqual(["A"]) && soComCota.Total is { Acumulado.Venda: 5000m, MetaMes: 25000m });

@@ -17,9 +17,55 @@
                         <span class="bi bi-speedometer2 me-2" aria-hidden="true"></span> Painel
                     </NavLink>
                 </div>
+                <div class="nav-secao px-3">Comercial</div>
+            </Authorized>
+        </AuthorizeView>
+        <AuthorizeView Roles="@Perfis.Gestao">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="comercial">
+                        <span class="bi bi-bullseye me-2" aria-hidden="true"></span> Metas por vendedor
+                    </NavLink>
+                </div>
+        </AuthorizeView>
+        <AuthorizeView>
+            <Authorized Context="usuario">
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="precificacao">
+                        <span class="bi bi-calculator me-2" aria-hidden="true"></span> Precificação
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+        <AuthorizeView Roles="@Perfis.Gestao">
+                <div class="nav-secao px-3">Financeiro</div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="dre">
+                        <span class="bi bi-bar-chart-line me-2" aria-hidden="true"></span> DRE
+                    </NavLink>
+                </div>
+                <div class="nav-secao px-3">Gestão</div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="ponto-equilibrio">
+                        <span class="bi bi-graph-up-arrow me-2" aria-hidden="true"></span> Ponto de equilíbrio
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="projecao">
+                        <span class="bi bi-binoculars me-2" aria-hidden="true"></span> Projeção
+                    </NavLink>
+                </div>
+        </AuthorizeView>
+        <AuthorizeView>
+            <Authorized Context="usuario">
+                <div class="nav-secao px-3">Acompanhamento</div>
                 <div class="nav-item px-3">
                     <NavLink class="nav-link" href="alertas">
                         <span class="bi bi-bell me-2" aria-hidden="true"></span> Alertas
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="mensagens">
+                        <span class="bi bi-whatsapp me-2" aria-hidden="true"></span> Mensagens
                     </NavLink>
                 </div>
             </Authorized>
@@ -32,39 +78,12 @@
                 </div>
         </AuthorizeView>
         <AuthorizeView Roles="@Perfis.Administrador">
+                <div class="nav-secao px-3">Administração</div>
                 <div class="nav-item px-3">
                     <NavLink class="nav-link" href="clientes">
                         <span class="bi bi-building me-2" aria-hidden="true"></span> Clientes
                     </NavLink>
                 </div>
-        </AuthorizeView>
-        <AuthorizeView>
-            <Authorized Context="usuario">
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="precificacao">
-                        <span class="bi bi-calculator me-2" aria-hidden="true"></span> Precificação
-                    </NavLink>
-                </div>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="mensagens">
-                        <span class="bi bi-whatsapp me-2" aria-hidden="true"></span> Mensagens
-                    </NavLink>
-                </div>
-            </Authorized>
-        </AuthorizeView>
-        <AuthorizeView Roles="@Perfis.Gestao">
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="dre">
-                        <span class="bi bi-bar-chart-line me-2" aria-hidden="true"></span> DRE
-                    </NavLink>
-                </div>
-                <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="comercial">
-                        <span class="bi bi-people me-2" aria-hidden="true"></span> Comercial
-                    </NavLink>
-                </div>
-        </AuthorizeView>
-        <AuthorizeView Roles="@Perfis.Administrador">
                 <div class="nav-item px-3">
                     <NavLink class="nav-link" href="configuracoes">
                         <span class="bi bi-gear me-2" aria-hidden="true"></span> Configurações

@@ -113,12 +113,30 @@ if (args.Contains("--painel"))
     await using var dbPainel = await app.Services.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContextAsync();
     var cli = await dbPainel.Clientes.AsNoTracking().SingleAsync(c => c.Id == idPainel);
     var fimDre = await dbPainel.LancamentosDre.Where(l => l.ClienteId == idPainel && l.Grupo == GrupoDre.ReceitaBruta && l.Valor > 0).MaxAsync(l => (DateOnly?)l.Competencia);
-    var lanc = fimDre is DateOnly f ? await dbPainel.LancamentosDre.AsNoTracking().Where(l => l.ClienteId == idPainel && l.Competencia >= f.AddMonths(-13) && l.Competencia <= f).ToListAsync() : [];
+    var lanc = fimDre is DateOnly f ? await DreDados.CarregarAsync(dbPainel, idPainel, f.AddMonths(-13), f) : [];
     var rv = PainelResumo.Resumir(lanc, DataDosDados.Referencia(cli.DreDadosDe, cli.DreAtualizadoEm));
     var rp = PainelResumo.ResumirPrecos(cli, await dbPainel.Produtos.AsNoTracking().Where(p => p.ClienteId == idPainel && p.QtdMes > 0).ToListAsync());
     Console.WriteLine($"Venda {rv?.Mes:MM/yyyy}: {rv?.VendaLiquida:N2} parcial={rv?.Parcial} dias={rv?.DiasComDados} projeção={rv?.ProjecaoVenda:N2} vsMesAnt={rv?.VariacaoMesAnterior:P1} vsAnoAnt={rv?.VariacaoAnoAnterior:P1}");
     Console.WriteLine($"PE: {rv?.Pe?.PontoEquilibrio:N2} progresso={rv?.ProgressoPe:P1} projeçãoRB={rv?.ProjecaoReceitaBruta:N2}");
     Console.WriteLine($"Margem bruta: {rv?.MargemBrutaPct:P1}  Resultado {rv?.MesFechado:MM/yyyy}: {rv?.ResultadoMesFechado:N2} ({rv?.MargemLiquidaMesFechado:P1})");
+    if (fimDre is DateOnly fimAno)
+    {
+        var dreAno = Dre.Montar(await DreDados.CarregarAsync(dbPainel, idPainel, new DateOnly(fimAno.Year, 1, 1), fimAno));
+        var rbAno = dreAno[0].Ano;
+        Console.WriteLine($"DRE {fimAno.Year} (até {fimAno:MM}): receita bruta {rbAno:N2} · " + string.Join(" · ",
+            Dre.Margens.Select(m => $"{m.Nome} {dreAno.First(l => l.Titulo == m.Linha).Ano:N2} ({(rbAno != 0 ? dreAno.First(l => l.Titulo == m.Linha).Ano / rbAno : 0):P1})")));
+        Console.WriteLine("Despesas: " + string.Join(" · ", Dre.GruposDeDespesa.Select(g => $"{Dre.Nomes[g]} {dreAno.First(l => l.Grupo == g).Ano:N2}")));
+    }
+    var hojePainel = DateOnly.FromDateTime(DateTime.Today);
+    var lancProj = await DreDados.CarregarAsync(dbPainel, idPainel, new DateOnly(hojePainel.Year - 2, 1, 1), new DateOnly(hojePainel.Year, 12, 1));
+    if (Projecao.Projetar(lancProj, hojePainel.Year, hojePainel) is { } pj)
+    {
+        var sim = Projecao.Simular(pj.Estrutura);
+        Console.WriteLine($"Projeção {pj.Ano}: receita {pj.Receita:N2} (vs {pj.ReceitaAnoAnterior:N2}) crescimento={pj.CrescimentoRealizado:P1} lucro {pj.LucroLiquido:N2} realizados={pj.MesesRealizados} MC={pj.Estrutura.MargemContribuicaoPct:P1} fixos/mês={pj.Estrutura.FixosMes:N2} · 12m: receita {sim.Receita:N2} lucro {sim.Resultado:N2} PE {sim.PontoEquilibrioMes:N2}");
+    }
+    var rm = await ResumoMeta.CarregarAsync(dbPainel, idPainel, DateOnly.FromDateTime(DateTime.Today));
+    Console.WriteLine(rm is null ? "Meta: sem meta no mês" :
+        $"Meta {rm.Mes:MM/yyyy} até {rm.DataFinal:dd/MM}: venda {rm.Venda:N2} de {rm.Meta:N2} ({rm.Atingimento:P1}) ritmo={rm.Ritmo:N2} dias={rm.DiasUteisAcumulado}/{rm.DiasUteisMes} faltaPorDia={rm.FaltaPorDia:N2} projeção={rm.Projecao:N2} vendedores no ritmo={rm.VendedoresNaMeta}/{rm.VendedoresComMeta}");
     Console.WriteLine($"Preços: {rp.ComProblema} de {rp.ComVenda} (abaixo da regra {rp.AbaixoRegra}, margem negativa {rp.MargemNegativa}, sem custo {rp.SemCusto}) venda em risco {rp.VendaMesEmRisco:N2}/mês");
     return 0;
 }

@@ -81,7 +81,10 @@ public static class CalculoPreco
     }
 }
 
-/// <summary>Ponto de equilíbrio a partir da DRE: deduções e CMV são variáveis; despesas operacionais e financeiras são fixas.</summary>
+/// <summary>
+/// Ponto de equilíbrio a partir da DRE: deduções, CMV e despesas variáveis acompanham a venda;
+/// despesas fixas, depreciação e resultado financeiro são fixos.
+/// </summary>
 public record PontoEquilibrioDre(
     int Meses,
     decimal FaturamentoMedio,
@@ -90,9 +93,11 @@ public record PontoEquilibrioDre(
     decimal CmvPct,
     decimal MargemContribuicaoPct,
     decimal PontoEquilibrio,
-    decimal MargemSeguranca);
+    decimal MargemSeguranca,
+    decimal DespesasVariaveisPct = 0);
 
-public record LinhaDre(string Titulo, decimal[] Meses, bool Total, bool Negativa)
+/// <param name="Grupo">Grupo cujas contas podem ser abertas na tela (nulo nas linhas de total).</param>
+public record LinhaDre(string Titulo, decimal[] Meses, bool Total, bool Negativa, GrupoDre? Grupo = null)
 {
     public decimal Ano => Meses.Sum();
 }
@@ -104,11 +109,42 @@ public static class Dre
         [GrupoDre.ReceitaBruta] = "Receita bruta",
         [GrupoDre.Deducoes] = "(-) Deduções / impostos sobre vendas",
         [GrupoDre.Cmv] = "(-) CMV / custo das vendas",
-        [GrupoDre.DespesasOperacionais] = "(-) Despesas operacionais",
+        [GrupoDre.DespesasOperacionais] = "(-) Despesas fixas",
         [GrupoDre.ReceitasFinanceiras] = "(+) Receitas financeiras",
         [GrupoDre.DespesasFinanceiras] = "(-) Despesas financeiras",
-        [GrupoDre.ImpostosSobreLucro] = "(-) IR / CSLL"
+        [GrupoDre.ImpostosSobreLucro] = "(-) IR / CSLL",
+        [GrupoDre.DespesasVariaveis] = "(-) Despesas variáveis",
+        [GrupoDre.Depreciacao] = "(-) Depreciação e amortização"
     };
+
+    /// <summary>Grupos de despesa que a Vogel/gestor reclassifica conta a conta (fixa, variável, depreciação).</summary>
+    public static readonly GrupoDre[] GruposDeDespesa = [GrupoDre.DespesasOperacionais, GrupoDre.DespesasVariaveis, GrupoDre.Depreciacao];
+
+    /// <summary>
+    /// Sugestão pelo nome da conta, enquanto ninguém classificou: comissões, taxas de cartão, fretes e royalties são variáveis;
+    /// depreciação/amortização vai para a linha própria. Nulo = fica fixa.
+    /// </summary>
+    public static GrupoDre? Sugerir(string conta)
+    {
+        var c = Planilhas.Normalizar(conta);
+        if (c.Contains("deprecia") || c.Contains("amortiza")) return GrupoDre.Depreciacao;
+        if (c.Contains("comiss") || c.Contains("frete") || c.Contains("royalt") || (c.Contains("taxa") && c.Contains("cart"))) return GrupoDre.DespesasVariaveis;
+        return null;
+    }
+
+    /// <summary>
+    /// Aplica a classificação das despesas (salva no portal; sem ela, a sugestão pelo nome) sobre os lançamentos.
+    /// Só mexe nos grupos de despesa; altera os objetos recebidos (carregados sem rastreamento) e devolve a mesma lista.
+    /// </summary>
+    public static List<LancamentoDre> Classificar(List<LancamentoDre> lancamentos, IReadOnlyDictionary<string, GrupoDre>? classes)
+    {
+        foreach (var l in lancamentos.Where(l => GruposDeDespesa.Contains(l.Grupo)))
+        {
+            if (classes is not null && classes.TryGetValue(l.Conta, out var g) && GruposDeDespesa.Contains(g)) l.Grupo = g;
+            else if (l.Grupo == GrupoDre.DespesasOperacionais && Sugerir(l.Conta) is GrupoDre sugerido) l.Grupo = sugerido;
+        }
+        return lancamentos;
+    }
 
     /// <summary>Aceita o nome do enum ou textos comuns vindos de planilhas.</summary>
     public static bool TentarGrupo(string? texto, out GrupoDre grupo)
@@ -122,14 +158,16 @@ public static class Dre
             "receita" or "faturamento" or "vendas" => GrupoDre.ReceitaBruta,
             "deducao" or "dedução" or "impostos" => GrupoDre.Deducoes,
             "cmv" or "cpv" or "custo" => GrupoDre.Cmv,
-            "despesa" or "despesas" => GrupoDre.DespesasOperacionais,
+            "despesa" or "despesas" or "fixas" or "despesasfixas" => GrupoDre.DespesasOperacionais,
+            "variavel" or "variaveis" or "variáveis" => GrupoDre.DespesasVariaveis,
+            "depreciacao" or "depreciação" => GrupoDre.Depreciacao,
             "ir" or "csll" => GrupoDre.ImpostosSobreLucro,
             _ => (GrupoDre)(-1)
         };
         return Enum.IsDefined(grupo);
     }
 
-    private record ResumoMes(DateOnly Mes, decimal Receita, decimal Deducoes, decimal Cmv, decimal Fixos);
+    private record ResumoMes(DateOnly Mes, decimal Receita, decimal Deducoes, decimal Cmv, decimal Variaveis, decimal Fixos);
 
     private static List<ResumoMes> ResumirMeses(IEnumerable<LancamentoDre> lancamentos) =>
         lancamentos.GroupBy(l => l.Competencia)
@@ -138,7 +176,8 @@ public static class Dre
                 g.Where(l => l.Grupo == GrupoDre.ReceitaBruta).Sum(l => l.Valor),
                 g.Where(l => l.Grupo == GrupoDre.Deducoes).Sum(l => l.Valor),
                 g.Where(l => l.Grupo == GrupoDre.Cmv).Sum(l => l.Valor),
-                g.Where(l => l.Grupo is GrupoDre.DespesasOperacionais or GrupoDre.DespesasFinanceiras).Sum(l => l.Valor)
+                g.Where(l => l.Grupo == GrupoDre.DespesasVariaveis).Sum(l => l.Valor),
+                g.Where(l => l.Grupo is GrupoDre.DespesasOperacionais or GrupoDre.Depreciacao or GrupoDre.DespesasFinanceiras).Sum(l => l.Valor)
                     - g.Where(l => l.Grupo == GrupoDre.ReceitasFinanceiras).Sum(l => l.Valor)))
             .Where(m => m.Receita > 0 && m.Fixos > 0)
             .OrderBy(m => m.Mes)
@@ -177,12 +216,13 @@ public static class Dre
         var receita = meses.Sum(m => m.Receita);
         var deducoesPct = meses.Sum(m => m.Deducoes) / receita;
         var cmvPct = meses.Sum(m => m.Cmv) / receita;
-        var mc = 1m - deducoesPct - cmvPct;
+        var variaveisPct = meses.Sum(m => m.Variaveis) / receita;
+        var mc = 1m - deducoesPct - cmvPct - variaveisPct;
         var fixos = meses.Average(m => m.Fixos);
         var faturamento = receita / meses.Count;
         var pe = mc > 0 ? fixos / mc : 0m;
         var seguranca = pe > 0 ? (faturamento - pe) / faturamento : 0m;
-        return new(meses.Count, faturamento, fixos, deducoesPct, cmvPct, mc, pe, seguranca);
+        return new(meses.Count, faturamento, fixos, deducoesPct, cmvPct, mc, pe, seguranca, variaveisPct);
     }
 
     public const string Devolucoes = "(-) Devoluções de vendas";
@@ -192,44 +232,74 @@ public static class Dre
     /// <summary>Conta de devolução de venda (ex.: "Devoluções de vendas"), dentro das Deduções.</summary>
     public static bool EhDevolucao(string conta) => Planilhas.Normalizar(conta).StartsWith("devoluc");
 
+    public const string ReceitaLiquida = "= Receita líquida";
+    public const string LucroBruto = "= Lucro bruto";
+    public const string MargemContribuicao = "= Margem de contribuição";
+    public const string Ebitda = "= EBITDA";
+    public const string ResultadoOperacional = "= Resultado operacional";
+    public const string ResultadoAntesIr = "= Resultado antes do IR";
+    public const string LucroLiquido = "= Lucro líquido";
+
+    /// <summary>Margens mostradas abaixo da DRE (linha da DRE ÷ receita bruta).</summary>
+    public static readonly (string Nome, string Linha, string Dica)[] Margens =
+    [
+        ("Margem bruta", LucroBruto, "Lucro bruto ÷ receita bruta: o que sobra da venda depois de impostos, devoluções e custo das mercadorias."),
+        ("Margem de contribuição", MargemContribuicao, "Margem de contribuição ÷ receita bruta: o que sobra depois também das despesas variáveis (comissões, taxas de cartão, fretes) para pagar as despesas fixas."),
+        ("Margem operacional (EBITDA)", Ebitda, "EBITDA ÷ receita bruta: o resultado da operação da loja, antes de depreciação, juros e impostos sobre o lucro."),
+        ("Margem líquida", LucroLiquido, "Lucro líquido ÷ receita bruta: quanto de cada R$ 100 vendidos virou lucro no fim."),
+    ];
+
+    /// <summary>
+    /// DRE gerencial, mês a mês: receita → venda líquida → receita líquida → lucro bruto → margem de contribuição →
+    /// EBITDA → resultado operacional → resultado antes do IR → lucro líquido. Sempre as mesmas linhas, na mesma ordem.
+    /// </summary>
     public static List<LinhaDre> Montar(IEnumerable<LancamentoDre> lancamentos)
     {
+        var lista = lancamentos as IReadOnlyCollection<LancamentoDre> ?? lancamentos.ToList();
         var porGrupo = Enum.GetValues<GrupoDre>().ToDictionary(g => g, _ => new decimal[12]);
-        foreach (var l in lancamentos)
+        foreach (var l in lista)
             porGrupo[l.Grupo][l.Competencia.Month - 1] += l.Valor;
 
         // Deduções = devoluções + impostos sobre vendas; mostradas separadas, com a venda líquida (a "Venda" do ERP) no meio
         var devolucoes = new decimal[12];
-        foreach (var l in lancamentos)
+        foreach (var l in lista)
             if (l.Grupo == GrupoDre.Deducoes && EhDevolucao(l.Conta))
                 devolucoes[l.Competencia.Month - 1] += l.Valor;
 
         decimal[] Calc(Func<int, decimal> f) => Enumerable.Range(0, 12).Select(f).ToArray();
-        var rb = porGrupo[GrupoDre.ReceitaBruta];
+        decimal[] G(GrupoDre g) => porGrupo[g];
+        var rb = G(GrupoDre.ReceitaBruta);
         var vendaLiquida = Calc(i => rb[i] - devolucoes[i]);
-        var impostosVenda = Calc(i => porGrupo[GrupoDre.Deducoes][i] - devolucoes[i]);
-        var rl = Calc(i => rb[i] - porGrupo[GrupoDre.Deducoes][i]);
-        var lb = Calc(i => rl[i] - porGrupo[GrupoDre.Cmv][i]);
-        var ro = Calc(i => lb[i] - porGrupo[GrupoDre.DespesasOperacionais][i]);
-        var lair = Calc(i => ro[i] + porGrupo[GrupoDre.ReceitasFinanceiras][i] - porGrupo[GrupoDre.DespesasFinanceiras][i]);
-        var ll = Calc(i => lair[i] - porGrupo[GrupoDre.ImpostosSobreLucro][i]);
+        var impostosVenda = Calc(i => G(GrupoDre.Deducoes)[i] - devolucoes[i]);
+        var rl = Calc(i => rb[i] - G(GrupoDre.Deducoes)[i]);
+        var lb = Calc(i => rl[i] - G(GrupoDre.Cmv)[i]);
+        var mc = Calc(i => lb[i] - G(GrupoDre.DespesasVariaveis)[i]);
+        var ebitda = Calc(i => mc[i] - G(GrupoDre.DespesasOperacionais)[i]);
+        var ro = Calc(i => ebitda[i] - G(GrupoDre.Depreciacao)[i]);
+        var lair = Calc(i => ro[i] + G(GrupoDre.ReceitasFinanceiras)[i] - G(GrupoDre.DespesasFinanceiras)[i]);
+        var ll = Calc(i => lair[i] - G(GrupoDre.ImpostosSobreLucro)[i]);
 
+        LinhaDre Grupo(GrupoDre g, bool negativa) => new(Nomes[g], G(g), false, negativa, g);
         return
         [
-            new(Nomes[GrupoDre.ReceitaBruta], rb, false, false),
+            Grupo(GrupoDre.ReceitaBruta, false),
             new(Devolucoes, devolucoes, false, true),
             new(VendaLiquida, vendaLiquida, true, false),
-            new(ImpostosVenda, impostosVenda, false, true),
-            new("= Receita líquida", rl, true, false),
-            new(Nomes[GrupoDre.Cmv], porGrupo[GrupoDre.Cmv], false, true),
-            new("= Lucro bruto", lb, true, false),
-            new(Nomes[GrupoDre.DespesasOperacionais], porGrupo[GrupoDre.DespesasOperacionais], false, true),
-            new("= Resultado operacional", ro, true, false),
-            new(Nomes[GrupoDre.ReceitasFinanceiras], porGrupo[GrupoDre.ReceitasFinanceiras], false, false),
-            new(Nomes[GrupoDre.DespesasFinanceiras], porGrupo[GrupoDre.DespesasFinanceiras], false, true),
-            new("= Resultado antes do IR", lair, true, false),
-            new(Nomes[GrupoDre.ImpostosSobreLucro], porGrupo[GrupoDre.ImpostosSobreLucro], false, true),
-            new("= Lucro líquido", ll, true, false)
+            new(ImpostosVenda, impostosVenda, false, true, GrupoDre.Deducoes),
+            new(ReceitaLiquida, rl, true, false),
+            Grupo(GrupoDre.Cmv, true),
+            new(LucroBruto, lb, true, false),
+            Grupo(GrupoDre.DespesasVariaveis, true),
+            new(MargemContribuicao, mc, true, false),
+            Grupo(GrupoDre.DespesasOperacionais, true),
+            new(Ebitda, ebitda, true, false),
+            Grupo(GrupoDre.Depreciacao, true),
+            new(ResultadoOperacional, ro, true, false),
+            Grupo(GrupoDre.ReceitasFinanceiras, false),
+            Grupo(GrupoDre.DespesasFinanceiras, true),
+            new(ResultadoAntesIr, lair, true, false),
+            Grupo(GrupoDre.ImpostosSobreLucro, true),
+            new(LucroLiquido, ll, true, false)
         ];
     }
 }

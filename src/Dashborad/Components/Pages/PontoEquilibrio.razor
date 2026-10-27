@@ -1,0 +1,136 @@
+@page "/ponto-equilibrio"
+@attribute [Authorize(Roles = Perfis.Gestao)]
+@implements IDisposable
+@inject ClienteAtualService ClienteAtual
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject AcessoService Acessos
+
+<PageTitle>Ponto de equilíbrio · Vogel</PageTitle>
+
+<SubAbas Area="Gestão" />
+
+<div class="cabecalho-pagina">
+    <h1>Ponto de equilíbrio@(empresa is not null ? $" · {empresa.Nome}" : "")</h1>
+    @if (empresa is not null)
+    {
+        <select class="form-select w-auto" @bind="ano" @bind:after="Carregar">
+            @for (var a = DateTime.Today.Year; a >= DateTime.Today.Year - 5; a--) { <option value="@a">@a</option> }
+        </select>
+    }
+</div>
+
+@if (empresa is null)
+{
+    <div class="cartao text-muted">@(acesso.EhVogel ? "Escolha o cliente no topo da tela." : "Seu usuário não está ligado a uma empresa ativa. Fale com a Vogel.")</div>
+}
+else if (mesesDisponiveis.Count == 0)
+{
+    <div class="cartao text-muted">Sem meses com vendas e despesas na DRE de @ano. <a href="dre">Abrir a DRE</a></div>
+}
+else
+{
+    <div class="cartao">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <h2 class="h5 m-0">Quanto a empresa precisa vender por mês para não ter prejuízo</h2>
+            @if (acesso.Altera) { <button class="btn btn-sm btn-outline-primary" @onclick="UsarNaPrecificacao" disabled="@(pe is null)"><i class="bi bi-calculator"></i> Usar na precificação</button> }
+        </div>
+        @if (pe is null)
+        {
+            <div class="text-muted">Selecione ao menos um mês.</div>
+        }
+        else
+        {
+            <div class="row g-3">
+                <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="Faturamento bruto mínimo por mês para pagar todas as despesas fixas, sem lucro nem prejuízo.">Ponto de equilíbrio / mês</span></div><div class="valor">@pe.PontoEquilibrio.ToString("C0")</div><div class="detalhe">custos fixos ÷ margem de contribuição</div></div></div>
+                <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="Média da receita bruta dos meses marcados abaixo.">Faturamento médio / mês</span></div><div class="valor">@pe.FaturamentoMedio.ToString("C0")</div><div class="detalhe">@pe.Meses mês(es) considerado(s)</div></div></div>
+                @if (pe.MargemSeguranca >= 0)
+                {
+                    <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="(Faturamento médio − ponto de equilíbrio) ÷ faturamento médio: quanto a venda pode cair antes de dar prejuízo.">Margem de segurança</span></div><div class="valor positivo">@pe.MargemSeguranca.ToString("P1")</div><div class="detalhe">a venda pode cair até @pe.MargemSeguranca.ToString("P1") (@((pe.FaturamentoMedio - pe.PontoEquilibrio).ToString("C0"))/mês) antes de dar prejuízo</div></div></div>
+                }
+                else
+                {
+                    <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="O faturamento médio dos meses marcados não cobre os custos fixos: nesses meses a operação deu prejuízo.">Abaixo do equilíbrio</span></div><div class="valor negativo">@((pe.PontoEquilibrio - pe.FaturamentoMedio).ToString("C0"))<small>/mês</small></div><div class="detalhe">faltam de venda para cobrir os custos fixos: a venda precisa subir <strong>@((pe.PontoEquilibrio / pe.FaturamentoMedio - 1).ToString("P1"))</strong> para chegar ao lucro zero</div></div></div>
+                }
+                <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="O que sobra de cada venda depois de impostos, devoluções, custo das mercadorias e despesas variáveis, para pagar as despesas fixas.">Margem de contribuição</span></div><div class="valor">@pe.MargemContribuicaoPct.ToString("P1")</div><div class="detalhe">deduções @pe.DeducoesPct.ToString("P1") · CMV @pe.CmvPct.ToString("P1") · variáveis @pe.DespesasVariaveisPct.ToString("P1")</div></div></div>
+            </div>
+        }
+        <div class="small text-muted mt-3 mb-1">
+            Meses na média (clique para incluir/excluir). Meses com poucos dias de venda ou com contas ainda não lançadas ficam desmarcados:
+        </div>
+        <div class="d-flex flex-wrap gap-1">
+            @foreach (var m in mesesDisponiveis)
+            {
+                <button class="btn btn-sm @(mesesPe.Contains(m) ? "btn-primary" : "btn-outline-secondary")" @onclick="() => AlternarMes(m)">@NomesMeses[m.Month - 1]/@(m.Year % 100)</button>
+            }
+        </div>
+        <div class="small text-muted mt-2">
+            Custos fixos médios: @(pe?.CustosFixosMedios.ToString("C0") ?? "—")/mês (despesas fixas + depreciação + resultado financeiro).
+            Quais despesas são fixas ou variáveis se define na <a href="dre">DRE</a>, em "Classificar despesas".
+        </div>
+        @if (aviso is not null) { <div class="alert alert-success small mt-2 mb-0">@aviso</div> }
+    </div>
+}
+
+@code {
+    private static readonly string[] NomesMeses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+    private Acesso acesso = Acesso.Nenhum;
+    private Cliente? empresa;
+    private int ano = DateTime.Today.Year;
+    private List<LancamentoDre> lancamentos = [];
+    private PontoEquilibrioDre? pe;
+    private List<DateOnly> mesesDisponiveis = [];
+    private HashSet<DateOnly> mesesPe = [];
+    private string? aviso;
+
+    protected override async Task OnInitializedAsync()
+    {
+        acesso = await Acessos.ObterAsync();
+        ClienteAtual.Mudou += AoMudarCliente;
+        await AbrirEmpresa();
+    }
+
+    private Task AoMudarCliente() => InvokeAsync(async () => { await AbrirEmpresa(); StateHasChanged(); });
+
+    public void Dispose() => ClienteAtual.Mudou -= AoMudarCliente;
+
+    /// <summary>Abre no ano mais recente que tem lançamentos.</summary>
+    private async Task AbrirEmpresa()
+    {
+        empresa = null;
+        aviso = null;
+        var id = acesso.EhCliente ? acesso.ClienteId : ClienteAtual.Filtro;
+        if (id is not int clienteId || !acesso.PodeVerCliente(clienteId)) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        empresa = await acesso.Filtrar(db.Clientes).AsNoTracking().FirstOrDefaultAsync(c => c.Id == clienteId);
+        if (empresa is null) return;
+        if (await db.LancamentosDre.Where(l => l.ClienteId == clienteId).MaxAsync(l => (DateOnly?)l.Competencia) is DateOnly ultimo) ano = ultimo.Year;
+        await Carregar();
+    }
+
+    private async Task Carregar()
+    {
+        if (empresa is null) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        lancamentos = await DreDados.CarregarAsync(db, empresa.Id, new DateOnly(ano, 1, 1), new DateOnly(ano, 12, 1));
+        mesesDisponiveis = Dre.MesesComMovimento(lancamentos);
+        mesesPe = Dre.MesesSugeridosPe(lancamentos).ToHashSet();
+        pe = Dre.PontoEquilibrio(lancamentos, mesesPe);
+    }
+
+    private void AlternarMes(DateOnly mes)
+    {
+        if (!mesesPe.Remove(mes)) mesesPe.Add(mes);
+        pe = Dre.PontoEquilibrio(lancamentos, mesesPe);
+    }
+
+    private async Task UsarNaPrecificacao()
+    {
+        if (pe is null || empresa is null || !acesso.Altera || !acesso.PodeVerCliente(empresa.Id)) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        await db.Clientes.Where(c => c.Id == empresa.Id).ExecuteUpdateAsync(u => u
+            .SetProperty(c => c.CustosFixosMensais, Math.Round(pe.CustosFixosMedios, 2))
+            .SetProperty(c => c.FaturamentoMedioMensal, Math.Round(pe.FaturamentoMedio, 2))
+            .SetProperty(c => c.ImpostosPct, Math.Round(pe.DeducoesPct * 100, 2)));
+        aviso = $"Precificação atualizada: custos fixos {pe.CustosFixosMedios:C0}/mês, faturamento {pe.FaturamentoMedio:C0}/mês, deduções {pe.DeducoesPct:P1} (impostos + devoluções).";
+    }
+}

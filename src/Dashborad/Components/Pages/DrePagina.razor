@@ -10,10 +10,25 @@
 
 <PageTitle>DRE · Vogel</PageTitle>
 
+<SubAbas Area="Financeiro" />
+
 <div class="cabecalho-pagina">
     <h1>DRE gerencial@(clienteId > 0 ? $" · {clientes.FirstOrDefault(c => c.Id == clienteId)?.Nome}" : "")</h1>
-    <div class="d-flex flex-wrap gap-2">
-        <select class="form-select w-auto" @bind="ano" @bind:after="Carregar">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        @if (TemDados)
+        {
+            <div class="btn-group" role="group" aria-label="Visão">
+                <button class="btn btn-sm @(comparativo ? "btn-outline-primary" : "btn-primary")" @onclick="() => TrocarVisao(false)">Mês a mês</button>
+                <button class="btn btn-sm @(comparativo ? "btn-primary" : "btn-outline-primary")" @onclick="() => TrocarVisao(true)">Comparativo</button>
+            </div>
+            @if (comparativo)
+            {
+                <select class="form-select w-auto" @bind="mesComparado" @bind:after="AgendarGraficos" aria-label="Mês">
+                    @for (var m = 1; m <= 12; m++) { <option value="@m">@NomesMeses[m - 1]</option> }
+                </select>
+            }
+        }
+        <select class="form-select w-auto" @bind="ano" @bind:after="Carregar" aria-label="Ano">
             @for (var a = DateTime.Today.Year; a >= DateTime.Today.Year - 5; a--) { <option value="@a">@a</option> }
         </select>
     </div>
@@ -27,75 +42,182 @@ else
 {
     @if (linhas is not null && TemDados)
     {
-        var rb = linhas[0].Ano;
-        var ll = linhas[^1].Ano;
-        var lb = linhas.First(l => l.Titulo == "= Lucro bruto").Ano;
-        <div class="row g-3 mb-3">
-            <div class="col-6 col-lg-3"><div class="cartao kpi"><div class="rotulo"><span class="dica" title="Total vendido no ano (NF-e, NFC-e e vendas sem nota), antes de impostos e devoluções.">Receita bruta @ano</span></div><div class="valor">@rb.ToString("C0")</div></div></div>
-            <div class="col-6 col-lg-3"><div class="cartao kpi"><div class="rotulo"><span class="dica" title="Lucro bruto ÷ receita bruta: quanto sobra da venda depois de impostos, devoluções e custo das mercadorias.">Margem bruta</span></div><div class="valor">@(rb != 0 ? (lb / rb).ToString("P1") : "—")</div></div></div>
-            <div class="col-6 col-lg-3"><div class="cartao kpi"><div class="rotulo"><span class="dica" title="Resultado final do ano depois de todas as despesas.">Lucro líquido</span></div><div class="valor @(ll < 0 ? "negativo" : "")">@ll.ToString("C0")</div></div></div>
-            <div class="col-6 col-lg-3"><div class="cartao kpi"><div class="rotulo"><span class="dica" title="Lucro líquido ÷ receita bruta: quanto de cada R$ 100 vendidos virou lucro.">Margem líquida</span></div><div class="valor @(ll < 0 ? "negativo" : "")">@(rb != 0 ? (ll / rb).ToString("P1") : "—")</div></div></div>
+        var rb = Periodo(Dre.Nomes[GrupoDre.ReceitaBruta]);
+        var rbAnt = PeriodoAnt(Dre.Nomes[GrupoDre.ReceitaBruta]);
+        var ll = Periodo(Dre.LucroLiquido);
+        <div class="small text-muted mb-2">
+            @if (comparativo) { <span>Cartões: <strong>@NomesMeses[mesComparado - 1]/@ano</strong>@(Parcial(mesComparado) ? " (mês em andamento)" : "") comparado com @NomesMeses[mesComparado - 1]/@(ano - 1).</span> }
+            else { <span>Cartões: <strong>acumulado de jan a @NomesMeses[ultimoMes - 1].ToLower()/@ano</strong> comparado com o mesmo período de @(ano - 1).</span> }
+            Margens sobre a receita bruta.
+        </div>
+        <div class="row row-cols-2 row-cols-lg-5 g-3 mb-3">
+            <div class="col"><div class="cartao kpi h-100">
+                <div class="rotulo"><span class="dica" title="Total vendido (NF-e, NFC-e e vendas sem nota), antes de devoluções e impostos.">Receita bruta</span></div>
+                <div class="valor">@rb.ToString("C0")</div>
+                @if (rbAnt != 0) { <div class="detalhe"><span class="@(rb >= rbAnt ? "positivo" : "negativo")">@((rb / rbAnt - 1).ToString("+0.0%;-0.0%"))</span> vs @(comparativo ? $"{NomesMeses[mesComparado - 1]}/{ano - 1}" : (ano - 1).ToString()) (@rbAnt.ToString("C0"))</div> }
+            </div></div>
+            @foreach (var (nome, linha, dica) in Dre.Margens.Take(3))
+            {
+                var atual = rb != 0 ? Periodo(linha) / rb : (decimal?)null;
+                var anterior = rbAnt != 0 ? PeriodoAnt(linha) / rbAnt : (decimal?)null;
+                <div class="col"><div class="cartao kpi h-100">
+                    <div class="rotulo"><span class="dica" title="@dica">@nome</span></div>
+                    <div class="valor @(atual < 0 ? "negativo" : "")">@(atual?.ToString("P1") ?? "—")</div>
+                    <div class="detalhe">@Periodo(linha).ToString("C0")</div>
+                    @if (atual is decimal a && anterior is decimal b) { <div class="detalhe"><span class="@(a >= b ? "positivo" : "negativo")">@(((a - b) * 100).ToString("+0.0;-0.0")) p.p.</span> vs @b.ToString("P1")</div> }
+                </div></div>
+            }
+            <div class="col"><div class="cartao kpi h-100">
+                <div class="rotulo"><span class="dica" title="Resultado final, depois de todas as despesas, do resultado financeiro e do IR/CSLL.">Lucro líquido</span></div>
+                <div class="valor @(ll < 0 ? "negativo" : "")">@ll.ToString("C0")</div>
+                <div class="detalhe">margem líquida <strong class="@(ll < 0 ? "negativo" : "")">@(rb != 0 ? (ll / rb).ToString("P1") : "—")</strong></div>
+                @if (rbAnt != 0) { <div class="detalhe">@(comparativo ? $"{NomesMeses[mesComparado - 1]}/{ano - 1}" : (ano - 1).ToString()): @PeriodoAnt(Dre.LucroLiquido).ToString("C0") (@((PeriodoAnt(Dre.LucroLiquido) / rbAnt).ToString("P1")))</div> }
+            </div></div>
         </div>
 
-        @if (pe is not null || mesesDisponiveis.Count > 0)
-        {
-            <div class="cartao">
-                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-                    <h2 class="h5 m-0">Ponto de equilíbrio</h2>
-                    @if (acesso.Altera) { <button class="btn btn-sm btn-outline-primary" @onclick="UsarNaPrecificacao" disabled="@(pe is null)"><i class="bi bi-calculator"></i> Usar na precificação</button> }
-                </div>
-                @if (pe is null)
-                {
-                    <div class="text-muted">Selecione ao menos um mês.</div>
-                }
-                else
-                {
-                <div class="row g-3">
-                    <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="Faturamento mínimo por mês para pagar todas as despesas fixas, sem lucro nem prejuízo.">Ponto de equilíbrio / mês</span></div><div class="valor">@pe.PontoEquilibrio.ToString("C0")</div><div class="detalhe">custos fixos ÷ margem de contribuição</div></div></div>
-                    <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="Média da receita bruta dos meses marcados abaixo.">Faturamento médio / mês</span></div><div class="valor">@pe.FaturamentoMedio.ToString("C0")</div><div class="detalhe">@pe.Meses mês(es) considerados</div></div></div>
-                    <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="Quanto o faturamento pode cair antes de dar prejuízo.">Margem de segurança</span></div><div class="valor @(pe.MargemSeguranca < 0 ? "negativo" : "positivo")">@pe.MargemSeguranca.ToString("P1")</div><div class="detalhe">quanto a venda pode cair até o lucro zero</div></div></div>
-                    <div class="col-6 col-lg-3"><div class="kpi"><div class="rotulo"><span class="dica" title="O que sobra de cada venda após impostos, devoluções e custo das mercadorias, para pagar as despesas fixas.">Margem de contribuição</span></div><div class="valor">@pe.MargemContribuicaoPct.ToString("P1")</div><div class="detalhe">deduções @pe.DeducoesPct.ToString("P1") · CMV @pe.CmvPct.ToString("P1")</div></div></div>
-                </div>
-                }
-                <div class="small text-muted mt-3 mb-1">
-                    Meses na média (clique para incluir/excluir). Meses com poucos dias de venda ou com contas ainda não lançadas ficam desmarcados:
-                </div>
-                <div class="d-flex flex-wrap gap-1">
-                    @foreach (var m in mesesDisponiveis)
-                    {
-                        <button class="btn btn-sm @(mesesPe.Contains(m) ? "btn-primary" : "btn-outline-secondary")" @onclick="() => AlternarMes(m)">@Meses[m.Month - 1]/@(m.Year % 100)</button>
-                    }
-                </div>
-                <div class="small text-muted mt-2">Custos fixos médios: @(pe?.CustosFixosMedios.ToString("C0") ?? "—")/mês (despesas operacionais + financeiras).</div>
-            </div>
-        }
-
-        <div class="cartao">
-            <h2 class="h5">Receita x Lucro líquido por mês</h2>
-            <div class="area-grafico"><canvas id="graficoDre"></canvas></div>
+        <div class="row g-3 mb-3">
+            <div class="col-lg-6"><div class="cartao h-100 m-0">
+                <h2 class="h6">Receita bruta x lucro líquido · @ano</h2>
+                <div class="area-grafico"><canvas id="graficoDre"></canvas></div>
+            </div></div>
+            <div class="col-lg-6"><div class="cartao h-100 m-0">
+                <h2 class="h6">Margens por mês · @ano</h2>
+                <div class="area-grafico"><canvas id="graficoMargens"></canvas></div>
+            </div></div>
         </div>
 
         <div class="cartao">
             <div class="table-wrap">
-                <table class="table table-dre m-0">
-                    <thead>
-                        <tr><th></th>@foreach (var m in Meses) { <th class="num">@m</th> }<th class="num">Total</th><th class="num"><span class="dica" title="Análise vertical: quanto cada linha representa da receita bruta do ano.">AV%</span></th></tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var l in linhas)
-                        {
-                            <tr class="@(l.Total ? "total" : "")">
-                                <td class="text-nowrap"><span class="@(DicasDre.ContainsKey(l.Titulo) ? "dica" : "")" title="@DicasDre.GetValueOrDefault(l.Titulo)">@l.Titulo</span></td>
-                                @foreach (var v in l.Meses) { <td class="num @(l.Total && v < 0 ? "negativo" : "")">@(v == 0 ? "–" : v.ToString("N0"))</td> }
-                                <td class="num @(l.Total && l.Ano < 0 ? "negativo" : "")">@l.Ano.ToString("N0")</td>
-                                <td class="num">@(rb != 0 ? (l.Ano / rb).ToString("P1") : "")</td>
+                @if (!comparativo)
+                {
+                    <table class="table table-dre m-0">
+                        <thead>
+                            <tr><th></th>@foreach (var m in NomesMeses) { <th class="num">@m</th> }<th class="num">Total</th><th class="num"><span class="dica" title="Análise vertical: quanto cada linha representa da receita bruta do ano.">AV%</span></th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var l in Visiveis())
+                            {
+                                @LinhaMensal(l.Titulo, l.Meses, l.Total, l.Grupo, conta: false)
+                                @if (l.Grupo is GrupoDre g && abertos.Contains(l.Titulo))
+                                {
+                                    @foreach (var (conta, serie) in Contas(l))
+                                    {
+                                        @LinhaMensal(conta, serie.Atual, false, null, conta: true)
+                                    }
+                                }
+                            }
+                            @{ var primeira = true; }
+                            @foreach (var (nome, linha, dica) in Dre.Margens)
+                            {
+                                var valores = Linha(linha).Meses;
+                                var rbm = Linha(Dre.Nomes[GrupoDre.ReceitaBruta]).Meses;
+                                <tr class="margem @(primeira ? "primeira" : "")">
+                                    <td class="text-nowrap"><span class="dica" title="@dica">@nome</span></td>
+                                    @for (var i = 0; i < 12; i++) { var pct = rbm[i] != 0 ? valores[i] / rbm[i] : (decimal?)null; <td class="num @(pct < 0 ? "negativo" : "")">@(pct?.ToString("P1") ?? "–")</td> }
+                                    <td class="num">@(rbm.Sum() != 0 ? (valores.Sum() / rbm.Sum()).ToString("P1") : "–")</td><td></td>
+                                </tr>
+                                primeira = false;
+                            }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    var mes = mesComparado;
+                    <table class="table table-dre m-0">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th class="num">@NomesMeses[mes - 1]/@(ano % 100)@(Parcial(mes) ? "*" : "")</th><th class="num">AV%</th>
+                                <th class="num">@(mes == 1 ? $"Dez/{(ano - 1) % 100}" : $"{NomesMeses[mes - 2]}/{ano % 100}")</th><th class="num"><span class="dica" title="Variação contra o mês anterior.">Var.</span></th>
+                                <th class="num">@NomesMeses[mes - 1]/@((ano - 1) % 100)</th><th class="num"><span class="dica" title="Variação contra o mesmo mês do ano anterior.">Var.</span></th>
+                                <th class="num">Acum. @(ano)</th><th class="num">AV%</th>
+                                <th class="num">Acum. @(ano - 1)</th><th class="num"><span class="dica" title="Acumulado de janeiro até o mês escolhido, contra o mesmo período do ano anterior.">Var.</span></th>
                             </tr>
-                        }
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            @foreach (var l in Visiveis())
+                            {
+                                var indice = linhas.IndexOf(l);
+                                @LinhaComparada(l.Titulo, new Serie(l.Meses, linhasAnt![indice].Meses), l.Total, l.Negativa, l.Grupo, conta: false)
+                                @if (l.Grupo is GrupoDre && abertos.Contains(l.Titulo))
+                                {
+                                    @foreach (var (conta, serie) in Contas(l))
+                                    {
+                                        @LinhaComparada(conta, serie, false, l.Negativa, null, conta: true)
+                                    }
+                                }
+                            }
+                            @{ var primeiraM = true; }
+                            @foreach (var (nome, linha, dica) in Dre.Margens)
+                            {
+                                var s = SerieDe(linha);
+                                var r = SerieDe(Dre.Nomes[GrupoDre.ReceitaBruta]);
+                                decimal? Pct(Coluna c) => Valor(r, c) is var v && v != 0 ? Valor(s, c) / v : null;
+                                <tr class="margem @(primeiraM ? "primeira" : "")">
+                                    <td class="text-nowrap"><span class="dica" title="@dica">@nome</span></td>
+                                    <td class="num">@(Pct(Coluna.Mes)?.ToString("P1") ?? "–")</td><td></td>
+                                    <td class="num">@(Pct(Coluna.MesAnterior)?.ToString("P1") ?? "–")</td>@DiferencaPp(Pct(Coluna.Mes), Pct(Coluna.MesAnterior))
+                                    <td class="num">@(Pct(Coluna.MesAnoAnterior)?.ToString("P1") ?? "–")</td>@DiferencaPp(Pct(Coluna.Mes), Pct(Coluna.MesAnoAnterior))
+                                    <td class="num">@(Pct(Coluna.Acumulado)?.ToString("P1") ?? "–")</td><td></td>
+                                    <td class="num">@(Pct(Coluna.AcumuladoAnoAnterior)?.ToString("P1") ?? "–")</td>@DiferencaPp(Pct(Coluna.Acumulado), Pct(Coluna.AcumuladoAnoAnterior))
+                                </tr>
+                                primeiraM = false;
+                            }
+                        </tbody>
+                    </table>
+                }
             </div>
-            <div class="small text-muted mt-2">AV% = análise vertical (percentual sobre a receita bruta).</div>
+            <div class="small text-muted mt-2">
+                Clique numa linha com <i class="bi bi-caret-right-fill"></i> para ver as contas. AV% = análise vertical (sobre a receita bruta); Var. = análise horizontal.
+                @if (comparativo && Parcial(mesComparado)) { <span>* Mês em andamento: compare com cuidado.</span> }
+                Linhas zeradas no ano ficam escondidas.
+            </div>
         </div>
+
+        @if (acesso.Altera && despesas.Count > 0)
+        {
+            <div class="cartao">
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <h2 class="h5 m-0 me-auto">Classificar despesas</h2>
+                    <span class="small text-muted">@despesas.Count(d => d.Grupo == GrupoDre.DespesasVariaveis) variável(is) · @despesas.Count(d => d.Grupo == GrupoDre.Depreciacao) depreciação · @despesas.Count(d => d.Grupo == GrupoDre.DespesasOperacionais) fixa(s)</span>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => mostrarClassificacao = !mostrarClassificacao">@(mostrarClassificacao ? "Fechar" : "Abrir")</button>
+                </div>
+                @if (mostrarClassificacao)
+                {
+                    <div class="small text-muted my-2">
+                        Despesas <strong>variáveis</strong> acompanham a venda (comissões, taxas de cartão, fretes de entrega) e entram na margem de contribuição.
+                        <strong>Fixas</strong> existem mesmo sem venda (salários, aluguel, sistemas). <strong>Depreciação</strong> fica entre o EBITDA e o resultado operacional.
+                        Contas que ninguém marcou seguem a sugestão pelo nome. A classificação vale para todos os anos e para o ponto de equilíbrio.
+                    </div>
+                    <div class="table-wrap" style="max-height: 28rem">
+                        <table class="table table-sm align-middle m-0">
+                            <thead><tr><th>Conta</th><th class="num">Total @ano</th><th style="width: 12rem">Classificação</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var d in despesas)
+                                {
+                                    <tr>
+                                        <td>@d.Conta</td>
+                                        <td class="num">@d.Total.ToString("N0")</td>
+                                        <td>
+                                            <select class="form-select form-select-sm" value="@((int)d.Grupo)" @onchange="e => Reclassificar(d, e)">
+                                                <option value="@((int)GrupoDre.DespesasOperacionais)">Fixa</option>
+                                                <option value="@((int)GrupoDre.DespesasVariaveis)">Variável</option>
+                                                <option value="@((int)GrupoDre.Depreciacao)">Depreciação</option>
+                                            </select>
+                                        </td>
+                                        <td class="small text-muted">@(d.Alterada ? "alterada (salvar)" : d.Salva ? "marcada" : d.Sugerida ? "sugerida pelo nome" : "")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="d-flex gap-2 mt-2">
+                        <button class="btn btn-sm btn-primary" @onclick="SalvarClassificacao" disabled="@(!despesas.Any(d => d.Alterada))"><i class="bi bi-check2"></i> Salvar classificação</button>
+                    </div>
+                }
+            </div>
+        }
     }
     else
     {
@@ -157,35 +279,177 @@ else
         [Dre.Nomes[GrupoDre.ReceitaBruta]] = "Total vendido: NF-e, NFC-e e vendas sem nota, só itens de venda (CFOP 5102/5405/6102...).",
         [Dre.Devolucoes] = "Mercadorias devolvidas pelos clientes (CFOP de devolução de venda).",
         [Dre.VendaLiquida] = "Receita bruta menos as devoluções: é a \"Venda\" da tela de indicadores do ERP.",
-        [Dre.ImpostosVenda] = "Impostos sobre a venda pagos: ICMS, PIS, COFINS, ISS, Simples (e demais deduções que não são devolução).",
-        ["= Receita líquida"] = "Receita bruta menos deduções: o que realmente fica da venda.",
+        [Dre.ImpostosVenda] = "Impostos sobre a venda: ICMS, PIS, COFINS, ISS, Simples (e demais deduções que não são devolução).",
+        [Dre.ReceitaLiquida] = "Receita bruta menos devoluções e impostos sobre a venda: o que realmente fica da venda.",
         [Dre.Nomes[GrupoDre.Cmv]] = "Custo das mercadorias vendidas: quantidade vendida × custo médio de reposição.",
-        ["= Lucro bruto"] = "Receita líquida menos o custo das mercadorias.",
-        [Dre.Nomes[GrupoDre.DespesasOperacionais]] = "Contas a pagar por centro de custo: pessoal, aluguel, administrativas, veículos, pró-labore.",
-        ["= Resultado operacional"] = "Lucro bruto menos as despesas para manter a operação.",
+        [Dre.LucroBruto] = "Receita líquida menos o custo das mercadorias.",
+        [Dre.Nomes[GrupoDre.DespesasVariaveis]] = "Despesas que acompanham a venda: comissões, taxas de cartão, fretes de entrega. Defina em \"Classificar despesas\".",
+        [Dre.MargemContribuicao] = "Lucro bruto menos as despesas variáveis: o que sobra de cada venda para pagar as despesas fixas.",
+        [Dre.Nomes[GrupoDre.DespesasOperacionais]] = "Despesas que existem mesmo sem venda: pessoal, aluguel, administrativas, veículos, pró-labore.",
+        [Dre.Ebitda] = "Resultado da operação antes de depreciação, juros e IR/CSLL (lucro operacional \"de caixa\").",
+        [Dre.Nomes[GrupoDre.Depreciacao]] = "Desgaste de máquinas, veículos e instalações (não sai do caixa no mês).",
+        [Dre.ResultadoOperacional] = "EBITDA menos a depreciação (EBIT).",
         [Dre.Nomes[GrupoDre.ReceitasFinanceiras]] = "Rendimentos e juros recebidos.",
         [Dre.Nomes[GrupoDre.DespesasFinanceiras]] = "Juros de empréstimos, tarifas bancárias e IOF.",
-        ["= Resultado antes do IR"] = "Resultado operacional mais receitas e menos despesas financeiras.",
+        [Dre.ResultadoAntesIr] = "Resultado operacional mais receitas e menos despesas financeiras.",
         [Dre.Nomes[GrupoDre.ImpostosSobreLucro]] = "Imposto de renda e contribuição social sobre o lucro.",
-        ["= Lucro líquido"] = "Resultado final: o que sobrou depois de tudo."
+        [Dre.LucroLiquido] = "Resultado final: o que sobrou depois de tudo."
     };
 
-    private static readonly string[] Meses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+    private static readonly string[] NomesMeses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
     private List<Cliente> clientes = [];
     private int clienteId;
     private int ano = DateTime.Today.Year;
-    private List<LancamentoDre> lancamentos = [];
-    private List<LinhaDre>? linhas;
-    private bool mostrarSql, ocupado, desenharGrafico;
+    private List<LancamentoDre> lancamentos = [], lancamentosAnt = [];
+    private List<LinhaDre>? linhas, linhasAnt;
+    private bool mostrarSql, ocupado, desenharGrafico, comparativo, mostrarClassificacao;
     private string? sqlDre, erro, aviso;
-
-    private PontoEquilibrioDre? pe;
-    private List<DateOnly> mesesDisponiveis = [];
-    private HashSet<DateOnly> mesesPe = [];
     private int sqlClienteId;
     private Acesso acesso = Acesso.Nenhum;
 
+    /// <summary>Último mês do ano com receita (1–12).</summary>
+    private int ultimoMes = 12;
+    private int mesComparado = 12;
+    private readonly HashSet<string> abertos = [];
+
     private bool TemDados => lancamentos.Count > 0;
+    private bool Parcial(int mes) => ano == DateTime.Today.Year && mes == DateTime.Today.Month;
+
+    // ---------------------------------------------------------------- valores por coluna
+
+    private sealed record Serie(decimal[] Atual, decimal[] Ant);
+    private enum Coluna { Mes, MesAnterior, MesAnoAnterior, Acumulado, AcumuladoAnoAnterior }
+
+    private decimal Valor(Serie s, Coluna c) => c switch
+    {
+        Coluna.Mes => s.Atual[mesComparado - 1],
+        Coluna.MesAnterior => mesComparado == 1 ? s.Ant[11] : s.Atual[mesComparado - 2],
+        Coluna.MesAnoAnterior => s.Ant[mesComparado - 1],
+        Coluna.Acumulado => s.Atual.Take(mesComparado).Sum(),
+        _ => s.Ant.Take(mesComparado).Sum()
+    };
+
+    private LinhaDre Linha(string titulo) => linhas!.First(l => l.Titulo == titulo);
+    private Serie SerieDe(string titulo) => new(Linha(titulo).Meses, linhasAnt!.First(l => l.Titulo == titulo).Meses);
+
+    /// <summary>Valor dos cartões: o mês escolhido (comparativo) ou o acumulado até o último mês com dados.</summary>
+    private decimal Periodo(string titulo) => comparativo ? Valor(SerieDe(titulo), Coluna.Mes) : Linha(titulo).Meses.Take(ultimoMes).Sum();
+    private decimal PeriodoAnt(string titulo) => comparativo ? Valor(SerieDe(titulo), Coluna.MesAnoAnterior) : linhasAnt!.First(l => l.Titulo == titulo).Meses.Take(ultimoMes).Sum();
+
+    /// <summary>Linhas de total sempre; linhas de grupo só se tiverem valor no ano ou no anterior.</summary>
+    private IEnumerable<LinhaDre> Visiveis() => linhas!.Where((l, i) => l.Total || l.Meses.Any(v => v != 0) || linhasAnt![i].Meses.Any(v => v != 0));
+
+    /// <summary>Contas de uma linha de grupo, nos dois anos (impostos sobre vendas: sem as devoluções).</summary>
+    private IEnumerable<(string Conta, Serie Serie)> Contas(LinhaDre l)
+    {
+        bool Da(LancamentoDre x) => x.Grupo == l.Grupo && (l.Grupo != GrupoDre.Deducoes || !Dre.EhDevolucao(x.Conta));
+        var contas = new Dictionary<string, Serie>();
+        foreach (var (lista, atual) in new[] { (lancamentos, true), (lancamentosAnt, false) })
+            foreach (var x in lista.Where(Da))
+            {
+                if (!contas.TryGetValue(x.Conta, out var s)) contas[x.Conta] = s = new Serie(new decimal[12], new decimal[12]);
+                (atual ? s.Atual : s.Ant)[x.Competencia.Month - 1] += x.Valor;
+            }
+        var ordem = comparativo ? (Func<Serie, decimal>)(s => Math.Abs(Valor(s, Coluna.Acumulado))) : s => Math.Abs(s.Atual.Sum());
+        return contas.Where(c => c.Value.Atual.Any(v => v != 0) || (comparativo && c.Value.Ant.Any(v => v != 0)))
+            .OrderByDescending(c => ordem(c.Value)).Select(c => (c.Key, c.Value));
+    }
+
+    private void Alternar(string titulo) { if (!abertos.Remove(titulo)) abertos.Add(titulo); }
+
+    private RenderFragment Titulo(string titulo, GrupoDre? grupo, bool conta) => __builder =>
+    {
+        if (grupo is not null)
+        {
+            <td class="text-nowrap abre" @onclick="() => Alternar(titulo)">
+                <i class="bi @(abertos.Contains(titulo) ? "bi-caret-down-fill" : "bi-caret-right-fill") small me-1"></i><span class="@(DicasDre.ContainsKey(titulo) ? "dica" : "")" title="@DicasDre.GetValueOrDefault(titulo)">@titulo</span>
+            </td>
+        }
+        else
+        {
+            <td class="text-nowrap"><span class="@(!conta && DicasDre.ContainsKey(titulo) ? "dica" : "")" title="@(conta ? null : DicasDre.GetValueOrDefault(titulo))">@titulo</span></td>
+        }
+    };
+
+    private RenderFragment LinhaMensal(string titulo, decimal[] meses, bool total, GrupoDre? grupo, bool conta) => __builder =>
+    {
+        var rbAno = Linha(Dre.Nomes[GrupoDre.ReceitaBruta]).Meses.Sum();
+        <tr class="@(total ? "total" : "") @(conta ? "detalhe-conta" : "")">
+            @Titulo(titulo, grupo, conta)
+            @foreach (var v in meses) { <td class="num @(total && v < 0 ? "negativo" : "")">@(v == 0 ? "–" : v.ToString("N0"))</td> }
+            <td class="num @(total && meses.Sum() < 0 ? "negativo" : "")">@meses.Sum().ToString("N0")</td>
+            <td class="num">@(rbAno != 0 ? (meses.Sum() / rbAno).ToString("P1") : "")</td>
+        </tr>
+    };
+
+    private RenderFragment LinhaComparada(string titulo, Serie s, bool total, bool negativa, GrupoDre? grupo, bool conta) => __builder =>
+    {
+        var rb = SerieDe(Dre.Nomes[GrupoDre.ReceitaBruta]);
+        string Num(decimal v) => v == 0 ? "–" : v.ToString("N0");
+        string Av(Coluna c) => Valor(rb, c) is var r && r != 0 ? (Valor(s, c) / r).ToString("P1") : "";
+        <tr class="@(total ? "total" : "") @(conta ? "detalhe-conta" : "")">
+            @Titulo(titulo, grupo, conta)
+            <td class="num @(total && Valor(s, Coluna.Mes) < 0 ? "negativo" : "")">@Num(Valor(s, Coluna.Mes))</td><td class="num ah">@Av(Coluna.Mes)</td>
+            <td class="num">@Num(Valor(s, Coluna.MesAnterior))</td>@Variacao(Valor(s, Coluna.Mes), Valor(s, Coluna.MesAnterior), negativa)
+            <td class="num">@Num(Valor(s, Coluna.MesAnoAnterior))</td>@Variacao(Valor(s, Coluna.Mes), Valor(s, Coluna.MesAnoAnterior), negativa)
+            <td class="num @(total && Valor(s, Coluna.Acumulado) < 0 ? "negativo" : "")">@Num(Valor(s, Coluna.Acumulado))</td><td class="num ah">@Av(Coluna.Acumulado)</td>
+            <td class="num">@Num(Valor(s, Coluna.AcumuladoAnoAnterior))</td>@Variacao(Valor(s, Coluna.Acumulado), Valor(s, Coluna.AcumuladoAnoAnterior), negativa)
+        </tr>
+    };
+
+    /// <summary>Análise horizontal: verde quando melhora (receita/resultado subindo, despesa caindo).</summary>
+    private static RenderFragment Variacao(decimal atual, decimal anterior, bool despesa) => __builder =>
+    {
+        if (anterior == 0) { <td class="num ah"></td> return; }
+        var v = (atual - anterior) / Math.Abs(anterior);
+        var melhora = despesa ? atual < anterior : atual > anterior;
+        <td class="num ah @(atual == anterior ? "" : melhora ? "positivo" : "negativo")">@v.ToString("+0.0%;-0.0%;0%")</td>
+    };
+
+    private static RenderFragment DiferencaPp(decimal? atual, decimal? anterior) => __builder =>
+    {
+        if (atual is not decimal a || anterior is not decimal b) { <td class="num ah"></td> return; }
+        <td class="num ah @(a > b ? "positivo" : a < b ? "negativo" : "")">@(((a - b) * 100).ToString("+0.0;-0.0;0")) p.p.</td>
+    };
+
+    // ---------------------------------------------------------------- classificação das despesas
+
+    private sealed class Despesa
+    {
+        public string Conta { get; init; } = "";
+        public decimal Total { get; init; }
+        public GrupoDre Grupo { get; set; }
+        public GrupoDre Original { get; init; }
+        public bool Salva { get; init; }
+        public bool Sugerida { get; init; }
+        public bool Alterada => Grupo != Original;
+    }
+    private List<Despesa> despesas = [];
+
+    private void Reclassificar(Despesa d, ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var g)) d.Grupo = (GrupoDre)g;
+    }
+
+    private async Task SalvarClassificacao()
+    {
+        if (!acesso.Altera || !acesso.PodeVerCliente(clienteId)) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        var existentes = await db.ClassificacoesDre.Where(c => c.ClienteId == clienteId).ToDictionaryAsync(c => c.Conta);
+        var alteradas = despesas.Where(d => d.Alterada).ToList();
+        foreach (var d in alteradas)
+        {
+            if (!existentes.TryGetValue(d.Conta, out var c)) db.ClassificacoesDre.Add(c = new ClassificacaoContaDre { ClienteId = clienteId, Conta = d.Conta });
+            c.Grupo = d.Grupo;
+            c.AtualizadoEm = DateTime.Now;
+            c.AtualizadoPor = acesso.Email;
+        }
+        await db.SaveChangesAsync();
+        await Carregar();
+        aviso = $"Classificação salva ({alteradas.Count} conta(s)). A DRE e o ponto de equilíbrio já usam a nova classificação.";
+    }
+
+    // ---------------------------------------------------------------- carga
 
     protected override async Task OnInitializedAsync()
     {
@@ -203,6 +467,7 @@ else
         clienteId = ClienteAtual.ClienteId;
         erro = aviso = null;
         mostrarSql = false;
+        abertos.Clear();
         if (clienteId > 0) await AoTrocarCliente(); else { lancamentos = []; linhas = null; }
         StateHasChanged();
     });
@@ -223,16 +488,15 @@ else
     {
         if (!acesso.PodeVerCliente(clienteId)) { clienteId = 0; lancamentos = []; linhas = null; return; }
         await using var db = await Fabrica.CreateDbContextAsync();
-        var inicio = new DateOnly(ano, 1, 1);
-        var fim = new DateOnly(ano, 12, 1);
-        lancamentos = await db.LancamentosDre.AsNoTracking()
-            .Where(l => l.ClienteId == clienteId && l.Competencia >= inicio && l.Competencia <= fim)
-            .ToListAsync();
+        lancamentos = await DreDados.CarregarAsync(db, clienteId, new DateOnly(ano, 1, 1), new DateOnly(ano, 12, 1));
+        lancamentosAnt = await DreDados.CarregarAsync(db, clienteId, new DateOnly(ano - 1, 1, 1), new DateOnly(ano - 1, 12, 1));
         linhas = Dre.Montar(lancamentos);
-        mesesDisponiveis = Dre.MesesComMovimento(lancamentos);
-        mesesPe = Dre.MesesSugeridosPe(lancamentos).ToHashSet();
-        pe = Dre.PontoEquilibrio(lancamentos, mesesPe);
-        desenharGrafico = TemDados;
+        linhasAnt = Dre.Montar(lancamentosAnt);
+        var receita = linhas[0].Meses;
+        ultimoMes = Enumerable.Range(1, 12).LastOrDefault(m => receita[m - 1] != 0, 12);
+        mesComparado = ultimoMes;
+        await CarregarDespesas(db);
+        AgendarGraficos();
         if (acesso.AtualizaDoBanco && sqlClienteId != clienteId)
         {
             sqlDre = (await db.Clientes.AsNoTracking().FirstOrDefaultAsync(c => c.Id == clienteId))?.SqlDre;
@@ -240,18 +504,46 @@ else
         }
     }
 
+    /// <summary>Contas de despesa do ano (como vieram do ERP/planilha) e como estão classificadas.</summary>
+    private async Task CarregarDespesas(ApplicationDbContext db)
+    {
+        if (!acesso.Altera) { despesas = []; return; }
+        var de = new DateOnly(ano, 1, 1);
+        var ate = new DateOnly(ano, 12, 1);
+        var brutas = await db.LancamentosDre.AsNoTracking()
+            .Where(l => l.ClienteId == clienteId && l.Competencia >= de && l.Competencia <= ate && Dre.GruposDeDespesa.Contains(l.Grupo))
+            .GroupBy(l => new { l.Conta, l.Grupo }).Select(g => new { g.Key.Conta, g.Key.Grupo, Total = g.Sum(l => l.Valor) }).ToListAsync();
+        var salvas = await DreDados.ClassificacoesAsync(db, clienteId);
+        despesas = brutas.GroupBy(b => b.Conta).Select(g =>
+        {
+            var origem = g.First().Grupo;
+            var sugerida = origem == GrupoDre.DespesasOperacionais ? Dre.Sugerir(g.Key) : null;
+            var grupo = salvas.TryGetValue(g.Key, out var s) ? s : sugerida ?? origem;
+            return new Despesa { Conta = g.Key, Total = g.Sum(x => x.Total), Grupo = grupo, Original = grupo, Salva = salvas.ContainsKey(g.Key), Sugerida = sugerida is not null };
+        }).OrderByDescending(d => d.Total).ToList();
+    }
+
+    private void TrocarVisao(bool comparar) { comparativo = comparar; AgendarGraficos(); }
+    private void AgendarGraficos() => desenharGrafico = TemDados;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!desenharGrafico || linhas is null) return;
         desenharGrafico = false;
-        var receita = linhas[0].Meses;
-        var lucro = linhas[^1].Meses;
-        await JS.InvokeVoidAsync("portal.grafico", "graficoDre", Meses, new object[]
+        var receita = Linha(Dre.Nomes[GrupoDre.ReceitaBruta]).Meses;
+        await JS.InvokeVoidAsync("portal.grafico", "graficoDre", NomesMeses, new object[]
         {
             new { label = "Receita bruta", data = receita, tipo = "bar", cor = "--grafico-1" },
-            new { label = "Lucro líquido", data = lucro, tipo = "line", cor = "--grafico-2" }
+            new { label = "Lucro líquido", data = Linha(Dre.LucroLiquido).Meses, tipo = "line", cor = "--grafico-2" }
         });
+        decimal?[] Margem(string titulo) { var v = Linha(titulo).Meses; return receita.Select((r, i) => r != 0 ? Math.Round(v[i] / r, 4) : (decimal?)null).ToArray(); }
+        var cores = new[] { "--grafico-1", "--grafico-2", "--grafico-3", "--grafico-4" };
+        await JS.InvokeVoidAsync("portal.grafico", "graficoMargens", NomesMeses,
+            Dre.Margens.Select((m, i) => (object)new { label = m.Nome, data = Margem(m.Linha), tipo = "line", cor = cores[i] }).ToArray(),
+            new { percentual = true });
     }
+
+    // ---------------------------------------------------------------- importação e exportação
 
     private async Task Importar(InputFileChangeEventArgs e)
     {
@@ -302,12 +594,6 @@ else
         aviso = $"{novos.Count} lançamento(s) importado(s) em {meses.Count} mês(es)." + (rejeitadas > 0 ? $" {rejeitadas} linha(s) ignorada(s) por competência ou grupo inválido." : "");
     }
 
-    private void AlternarMes(DateOnly mes)
-    {
-        if (!mesesPe.Remove(mes)) mesesPe.Add(mes);
-        pe = Dre.PontoEquilibrio(lancamentos, mesesPe);
-    }
-
     private async Task SalvarSql()
     {
         if (!acesso.EditaSql) return;
@@ -317,18 +603,6 @@ else
         aviso = "SQL da DRE salvo no cadastro do cliente.";
     }
 
-    private async Task UsarNaPrecificacao()
-    {
-        if (pe is null || !acesso.Altera || !acesso.PodeVerCliente(clienteId)) return;
-        await using var db = await Fabrica.CreateDbContextAsync();
-        await db.Clientes.Where(c => c.Id == clienteId).ExecuteUpdateAsync(u => u
-            .SetProperty(c => c.CustosFixosMensais, Math.Round(pe.CustosFixosMedios, 2))
-            .SetProperty(c => c.FaturamentoMedioMensal, Math.Round(pe.FaturamentoMedio, 2))
-            .SetProperty(c => c.ImpostosPct, Math.Round(pe.DeducoesPct * 100, 2)));
-        erro = null;
-        aviso = $"Precificação atualizada: custos fixos {pe.CustosFixosMedios:C0}/mês, faturamento {pe.FaturamentoMedio:C0}/mês, deduções {pe.DeducoesPct:P1} (impostos + devoluções).";
-    }
-
     private async Task BaixarModelo()
     {
         var bytes = Planilhas.GerarXlsx("Lancamentos", ["Competencia", "Grupo", "Conta", "Valor"],
@@ -336,8 +610,10 @@ else
             [$"01/{ano}", "ReceitaBruta", "Vendas de mercadorias", 100000m],
             [$"01/{ano}", "Deducoes", "Simples Nacional", 8000m],
             [$"01/{ano}", "Cmv", "Custo das mercadorias vendidas", 55000m],
+            [$"01/{ano}", "DespesasVariaveis", "Comissões de vendedores", 3000m],
             [$"01/{ano}", "DespesasOperacionais", "Folha de pagamento", 15000m],
             [$"01/{ano}", "DespesasOperacionais", "Aluguel", 5000m],
+            [$"01/{ano}", "Depreciacao", "Depreciação de veículos", 800m],
             [$"01/{ano}", "DespesasFinanceiras", "Tarifas e juros", 1200m]
         ]);
         await JS.InvokeVoidAsync("portal.baixarArquivo", "modelo-dre.xlsx", Convert.ToBase64String(bytes),
@@ -348,8 +624,14 @@ else
     {
         if (linhas is null) return;
         var nome = clientes.FirstOrDefault(c => c.Id == clienteId)?.Nome ?? "cliente";
-        var bytes = Planilhas.GerarXlsx($"DRE {ano}", ["Linha", .. Meses, "Total"],
-            linhas.Select(l => (IReadOnlyList<object?>)[l.Titulo, .. l.Meses.Cast<object?>(), l.Ano]));
+        var receita = Linha(Dre.Nomes[GrupoDre.ReceitaBruta]).Meses;
+        var margens = Dre.Margens.Select(m =>
+        {
+            var v = Linha(m.Linha).Meses;
+            return (IReadOnlyList<object?>)[m.Nome + " (%)", .. receita.Select((r, i) => r != 0 ? (object?)Math.Round(v[i] / r, 4) : null), receita.Sum() != 0 ? Math.Round(v.Sum() / receita.Sum(), 4) : null];
+        });
+        var bytes = Planilhas.GerarXlsx($"DRE {ano}", ["Linha", .. NomesMeses, "Total"],
+            linhas.Select(l => (IReadOnlyList<object?>)[l.Titulo, .. l.Meses.Cast<object?>(), l.Ano]).Concat(margens));
         await JS.InvokeVoidAsync("portal.baixarArquivo", $"dre-{nome}-{ano}.xlsx", Convert.ToBase64String(bytes),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     }

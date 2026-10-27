@@ -6,9 +6,10 @@ Programa que roda no servidor do cliente. Todo dia, na virada da data, ele roda 
 |---|---|
 | `LV_Dre` | uma linha por mês, grupo e conta. O programa recalcula o ano atual e o anterior (`DreAnos`). |
 | `LV_Precificacao` | uma linha por filial e produto (`Filiais`) |
-| `LV_Comercial` | uma linha por **dia** e vendedor (estrutura de venda do documento): venda bruta, devoluções, CMV (quantidade × "Custo total"), número de vendas e itens. O portal usa no relatório de metas (tela Comercial) |
+| `LV_Comercial` | uma linha por **dia**, vendedor (estrutura de venda do documento) e `Permuta` (0/1): venda bruta, devoluções, CMV (quantidade × "Custo total"), número de vendas e itens. O portal usa no relatório de metas (tela Comercial). BASELV antiga sem a coluna `Permuta`: o programa avisa e grava só a venda sem permuta (rode o `01-criar-baselv.sql` de novo) |
 | `LV_Cota` | metas (cotas) de venda por vendedor e mês, da tabela Cotas de Vendas do ERP |
-| `LV_Feriado` | feriados do ERP (fixos dd/mm já em datas, de 3 anos atrás até o ano que vem, mais os móveis): dias úteis = segunda a sábado, menos feriados |
+| `LV_Feriado` | feriados do ERP (fixos dd/mm já em datas, de 3 anos atrás até o ano que vem, mais os móveis): dias úteis = segunda a sexta = 1, sábado = ½, menos feriados (como o ERP) |
+| `LV_Pedido` | pedidos do botão "Sincronizar agora" do portal (`--pedidos` atende; uma sincronização completa também conclui os pedidos feitos antes dela) |
 | `LV_Rotina` | uma linha por rotina do portal (`consultas/rotinas/rotina-<Id>.sql`, exportadas pelo portal): quantidade, amostra de até 50 linhas e erro. O portal lê daqui para clientes com "Rotinas e alertas pela BASELV" |
 | `LV_Sincronizacao` | controle: última execução, quantidade de linhas e erro de cada item |
 

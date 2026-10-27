@@ -14,6 +14,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<ConfiguracaoMensagens> ConfiguracoesMensagens => Set<ConfiguracaoMensagens>();
     public DbSet<RotinaCliente> RotinasClientes => Set<RotinaCliente>();
     public DbSet<VendaVendedor> VendasVendedores => Set<VendaVendedor>();
+    public DbSet<ClassificacaoContaDre> ClassificacoesDre => Set<ClassificacaoContaDre>();
     public DbSet<MetaVendedor> MetasVendedores => Set<MetaVendedor>();
     public DbSet<FeriadoCliente> Feriados => Set<FeriadoCliente>();
     public DbSet<DiasUteisMes> DiasUteis => Set<DiasUteisMes>();
@@ -48,6 +49,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         builder.Entity<MensagemEnviada>().HasIndex(m => new { m.ClienteId, m.DataHora });
         builder.Entity<RotinaCliente>().HasIndex(r => new { r.RotinaId, r.ClienteId }).IsUnique();
         builder.Entity<VendaVendedor>().HasIndex(v => new { v.ClienteId, v.Data });
+        builder.Entity<ClassificacaoContaDre>().HasOne<Cliente>().WithMany().HasForeignKey(c => c.ClienteId).OnDelete(DeleteBehavior.Cascade);
+        builder.Entity<ClassificacaoContaDre>().HasIndex(c => new { c.ClienteId, c.Conta }).IsUnique();
         builder.Entity<FeriadoCliente>().HasIndex(f => new { f.ClienteId, f.Data }).IsUnique();
         builder.Entity<DiasUteisMes>().HasIndex(d => new { d.ClienteId, d.Competencia }).IsUnique();
         builder.Entity<MetaVendedor>().HasIndex(m => new { m.ClienteId, m.Competencia, m.Vendedor }).IsUnique();

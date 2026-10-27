@@ -278,7 +278,27 @@ public enum GrupoDre
     DespesasOperacionais,
     ReceitasFinanceiras,
     DespesasFinanceiras,
-    ImpostosSobreLucro
+    ImpostosSobreLucro,
+
+    /// <summary>Despesas que acompanham a venda (comissões, taxas de cartão, fretes): entram na margem de contribuição.</summary>
+    DespesasVariaveis,
+
+    /// <summary>Depreciação e amortização: fica entre o EBITDA e o resultado operacional.</summary>
+    Depreciacao
+}
+
+/// <summary>
+/// Como uma conta de despesa entra na DRE do cliente: fixa (DespesasOperacionais), variável (DespesasVariaveis) ou depreciação.
+/// Vale sobre o que vem do ERP/planilha, sem mexer nos lançamentos (sobrevive às importações).
+/// </summary>
+public class ClassificacaoContaDre
+{
+    public int Id { get; set; }
+    public int ClienteId { get; set; }
+    [StringLength(150)] public string Conta { get; set; } = "";
+    public GrupoDre Grupo { get; set; }
+    public DateTime AtualizadoEm { get; set; }
+    [StringLength(256)] public string? AtualizadoPor { get; set; }
 }
 
 public class LancamentoDre

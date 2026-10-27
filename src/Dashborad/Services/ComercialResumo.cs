@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Portal.Data;
 
 namespace Portal.Services;
@@ -88,6 +89,55 @@ public sealed record RelatorioMetas(
     LinhaMetas Total, List<GrupoMetas> Grupos)
 {
     public IEnumerable<LinhaMetas> Vendedores => Grupos.SelectMany(g => g.Vendedores);
+}
+
+/// <summary>
+/// Meta de vendas do mês para o cartão do Painel: o total do relatório de metas (mesmas regras do Comercial).
+/// </summary>
+/// <param name="VendedoresNaMeta">Vendedores com meta que já estão no ritmo (acumulado ≥ meta acumulada).</param>
+public sealed record ResumoMeta(DateOnly DataFinal, decimal Venda, decimal Meta, decimal MetaAcumulada, int DiasUteisAcumulado, int DiasUteisMes,
+    int VendedoresComMeta, int VendedoresNaMeta)
+{
+    public DateOnly Mes => new(DataFinal.Year, DataFinal.Month, 1);
+    public decimal Atingimento => Venda / Meta;
+
+    /// <summary>Venda − meta proporcional aos dias úteis até a data: positivo = adiantado; negativo = atrasado.</summary>
+    public decimal Ritmo => Venda - MetaAcumulada;
+
+    public int DiasUteisRestantes => Math.Max(0, DiasUteisMes - DiasUteisAcumulado);
+    public decimal Falta => Math.Max(0, Meta - Venda);
+
+    /// <summary>Quanto vender por dia útil restante para bater a meta (nulo se já bateu ou o mês acabou).</summary>
+    public decimal? FaltaPorDia => Falta > 0 && DiasUteisRestantes > 0 ? Falta / DiasUteisRestantes : null;
+
+    /// <summary>No ritmo atual: venda ÷ dias úteis até a data × dias úteis do mês (nulo no mês já completo ou sem dia útil ainda).</summary>
+    public decimal? Projecao => DiasUteisRestantes > 0 && DiasUteisAcumulado > 0 ? Venda / DiasUteisAcumulado * DiasUteisMes : null;
+
+    /// <summary>
+    /// Meta do mês do último dia com venda (sem permutas, como o padrão da tela Comercial), a partir do que está guardado no portal.
+    /// Nulo sem vendas importadas ou sem meta no mês.
+    /// </summary>
+    public static async Task<ResumoMeta?> CarregarAsync(ApplicationDbContext db, int clienteId, DateOnly hoje)
+    {
+        var ultimo = await db.VendasVendedores.Where(v => v.ClienteId == clienteId && v.Data <= hoje && !v.Permuta).MaxAsync(v => (DateOnly?)v.Data);
+        if (ultimo is not DateOnly fim) return null;
+        var mes = new DateOnly(fim.Year, fim.Month, 1);
+        var metas = await db.MetasVendedores.AsNoTracking().Where(m => m.ClienteId == clienteId && m.Competencia == mes).ToListAsync();
+        if (!metas.Any(m => m.Meta > 0)) return null;
+        var vendas = await db.VendasVendedores.AsNoTracking().Where(v => v.ClienteId == clienteId && v.Data >= mes && v.Data <= fim && !v.Permuta).ToListAsync();
+        var feriados = (await db.Feriados.AsNoTracking().Where(f => f.ClienteId == clienteId).Select(f => f.Data).ToListAsync()).ToHashSet();
+        var ajuste = await db.DiasUteis.AsNoTracking().Where(d => d.ClienteId == clienteId && d.Competencia == mes).Select(d => (int?)d.DiasUteis).FirstOrDefaultAsync();
+        return De(ComercialResumo.Montar(fim, vendas, metas, feriados, ajuste));
+    }
+
+    /// <summary>Nulo quando o mês não tem meta.</summary>
+    public static ResumoMeta? De(RelatorioMetas r)
+    {
+        if (r.Total.MetaMes is not > 0) return null;
+        var comMeta = r.Vendedores.Where(v => v.MetaMes is > 0).ToList();
+        return new ResumoMeta(r.DataFinal, r.Total.Acumulado.Venda, r.Total.MetaMes.Value, r.Total.MetaAcumulada ?? 0,
+            r.DiasUteisAcumulado, r.DiasUteisMes, comMeta.Count, comMeta.Count(v => v.DiferencaAcumulada >= 0));
+    }
 }
 
 public static class ComercialResumo

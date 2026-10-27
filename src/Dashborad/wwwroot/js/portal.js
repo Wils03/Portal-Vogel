@@ -11,8 +11,12 @@ window.portal = {
 
     graficos: {},
 
-    // series: [{ label, data, tipo ('bar'|'line'), cor }]
-    grafico: (id, rotulos, series) => {
+    // series: [{ label, data, tipo ('bar'|'line'), cor }]; opcoes: { percentual: true } para valores em fração (0,25 = 25%)
+    grafico: (id, rotulos, series, opcoes) => {
+        const pct = !!opcoes?.percentual;
+        const fmt = v => v == null ? '–' : pct
+            ? v.toLocaleString('pt-BR', { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 })
+            : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
         const canvas = document.getElementById(id);
         if (!canvas || !window.Chart) return;
         portal.graficos[id]?.destroy();
@@ -41,12 +45,12 @@ window.portal = {
                     legend: { position: 'bottom' },
                     tooltip: {
                         callbacks: {
-                            label: c => `${c.dataset.label}: ${c.parsed.y.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+                            label: c => `${c.dataset.label}: ${fmt(c.parsed.y)}`
                         }
                     }
                 },
                 scales: {
-                    y: { ticks: { callback: v => v.toLocaleString('pt-BR', { notation: 'compact' }) } }
+                    y: { ticks: { callback: v => pct ? v.toLocaleString('pt-BR', { style: 'percent' }) : v.toLocaleString('pt-BR', { notation: 'compact' }) } }
                 }
             }
         });

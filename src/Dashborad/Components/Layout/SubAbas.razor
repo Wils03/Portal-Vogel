@@ -1,0 +1,55 @@
+@* Sub-abas de uma área do menu (Comercial, Financeiro, Gestão). As que ainda não existem aparecem como "em breve". *@
+@inject AuthenticationStateProvider Autenticacao
+
+<nav class="sub-abas mb-3" aria-label="@Area">
+    <span class="sub-abas-area">@Area</span>
+    @foreach (var a in visiveis)
+    {
+        @if (a.Link is null)
+        {
+            <span class="sub-aba em-breve" title="Em breve">@a.Nome</span>
+        }
+        else
+        {
+            <NavLink class="sub-aba" href="@a.Link" Match="NavLinkMatch.All">@a.Nome</NavLink>
+        }
+    }
+</nav>
+
+@code {
+    /// <summary>"Comercial", "Financeiro" ou "Gestão".</summary>
+    [Parameter, EditorRequired] public string Area { get; set; } = "";
+
+    private sealed record Aba(string Nome, string? Link, string? Perfis = null);
+
+    private static readonly Dictionary<string, Aba[]> Areas = new()
+    {
+        ["Comercial"] =
+        [
+            new("Metas por vendedor", "comercial", Perfis.Gestao),
+            new("Precificação", "precificacao"),
+            new("Vendas", null),
+            new("Curva ABC", null)
+        ],
+        ["Financeiro"] =
+        [
+            new("DRE", "dre", Perfis.Gestao),
+            new("Fluxo de caixa", null),
+            new("Contas a receber e a pagar", null)
+        ],
+        ["Gestão"] =
+        [
+            new("Ponto de equilíbrio", "ponto-equilibrio", Perfis.Gestao),
+            new("Rentabilidade", null),
+            new("Projeção", "projecao", Perfis.Gestao)
+        ]
+    };
+
+    private List<Aba> visiveis = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var usuario = (await Autenticacao.GetAuthenticationStateAsync()).User;
+        visiveis = Areas.GetValueOrDefault(Area, []).Where(a => a.Perfis is null || a.Perfis.Split(',').Any(usuario.IsInRole)).ToList();
+    }
+}

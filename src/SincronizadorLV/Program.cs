@@ -76,7 +76,10 @@ try
     }
 
     Log("Início da sincronização");
-    var ok = await new Sincronizador(origem, destino, opcoes, Log).ExecutarAsync(itens, ano, CancellationToken.None);
+    var inicioGeral = DateTime.Now;
+    var sincronizador = new Sincronizador(origem, destino, opcoes, Log);
+    var ok = await sincronizador.ExecutarAsync(itens, ano, CancellationToken.None);
+    if (itens.Length == todos.Length && ano is null) await sincronizador.ConcluirPedidosPendentesAsync(inicioGeral, ok);
     Log(ok ? "Fim: tudo gravado." : "Fim: houve erro (veja acima e em LV_Sincronizacao).");
     return ok ? 0 : 1;
 }

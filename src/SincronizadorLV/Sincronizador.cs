@@ -90,6 +90,26 @@ public sealed partial class Sincronizador(string origem, string destino, Opcoes 
         return ok;
     }
 
+    /// <summary>
+    /// Depois de uma sincronização completa (à mão ou pela tarefa diária): pedidos do portal feitos antes do início
+    /// já foram atendidos por ela, então ficam concluídos (sem isso, o botão do portal fica esperando a tarefa de pedidos).
+    /// </summary>
+    public async Task ConcluirPedidosPendentesAsync(DateTime inicio, bool ok)
+    {
+        await using var cn = new SqlConnection(destino);
+        await cn.OpenAsync(CancellationToken.None);
+        await using var existe = new SqlCommand("SELECT OBJECT_ID('LV_Pedido')", cn);
+        if (await existe.ExecuteScalarAsync(CancellationToken.None) is null or DBNull) return;
+        await using var cmd = new SqlCommand("""
+            UPDATE LV_Pedido SET Status = @s, IniciadoEm = ISNULL(IniciadoEm, @inicio), ConcluidoEm = GETDATE(),
+                   Erro = CASE WHEN @s = 'Erro' THEN 'Houve erro em algum item (veja LV_Sincronizacao).' END
+            WHERE Status = 'Pendente' AND PedidoEm <= @inicio;
+            """, cn);
+        cmd.Parameters.AddWithValue("@s", ok ? "Concluido" : "Erro");
+        cmd.Parameters.AddWithValue("@inicio", inicio);
+        if (await cmd.ExecuteNonQueryAsync(CancellationToken.None) is int n and > 0) log($"Pedido(s) do portal atendido(s) por esta sincronização: {n}");
+    }
+
     // ---------------------------------------------------------------- DRE
 
     /// <summary>Ano atual e anteriores (DreAnos), um ano por vez — igual ao botão "Atualizar do banco" da tela DRE.</summary>

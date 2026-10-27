@@ -7,6 +7,9 @@ namespace Portal.Services;
 public sealed record SituacaoPedido(int Id, DateTime PedidoEm, string Status, DateTime? IniciadoEm, DateTime? ConcluidoEm, string? Erro)
 {
     public bool EmAndamento => Status is PedidoSincronizacao.Pendente or PedidoSincronizacao.Executando;
+
+    /// <summary>Pendente há mais de 20 min: o servidor do cliente não está atendendo pedidos (o botão volta a ficar livre).</summary>
+    public bool SemResposta(DateTime agora) => Status == PedidoSincronizacao.Pendente && agora - PedidoEm > PedidoSincronizacao.SemResposta;
 }
 
 public sealed record ResultadoPedido(bool Registrado, string Mensagem, SituacaoPedido? Situacao);
@@ -39,14 +42,26 @@ public class PedidoSincronizacao(BancoClienteService bancos)
     public async Task<SituacaoPedido?> UltimoAsync(Cliente cliente, CancellationToken ct = default)
     {
         var t = await bancos.ConsultarAsync(cliente,
-            "SELECT TOP 1 Id, PedidoEm, Status, IniciadoEm, ConcluidoEm, Erro FROM BASELV.dbo.LV_Pedido ORDER BY Id DESC", ct);
+            """
+            SELECT TOP 1 Id, PedidoEm, Status, IniciadoEm, ConcluidoEm, Erro,
+                   (SELECT MIN(s.UltimoFim) FROM BASELV.dbo.LV_Sincronizacao s WHERE s.UltimoInicio >= p.PedidoEm AND s.Erro IS NULL) AS SincronizadoEm
+            FROM BASELV.dbo.LV_Pedido p ORDER BY Id DESC
+            """, ct);
         if (t.Rows.Count == 0) return null;
         var r = t.Rows[0];
-        DateTime? Data(string c) => r[c] is DBNull or null ? null : Convert.ToDateTime(r[c], CultureInfo.InvariantCulture);
-        return new SituacaoPedido(Convert.ToInt32(r["Id"], CultureInfo.InvariantCulture), Data("PedidoEm")!.Value,
+        DateTime? Data(string c) => !t.Columns.Contains(c) || r[c] is DBNull or null ? null : Convert.ToDateTime(r[c], CultureInfo.InvariantCulture);
+        var situacao = new SituacaoPedido(Convert.ToInt32(r["Id"], CultureInfo.InvariantCulture), Data("PedidoEm")!.Value,
             Convert.ToString(r["Status"], CultureInfo.InvariantCulture)!.Trim(), Data("IniciadoEm"), Data("ConcluidoEm"),
             r["Erro"] is string e && e.Length > 0 ? e : null);
+        return Atendido(situacao, Data("SincronizadoEm"));
     }
+
+    /// <summary>
+    /// Pedido ainda pendente, mas o servidor já sincronizou depois dele (rodado à mão ou pela tarefa diária):
+    /// os dados novos já estão na BASELV, então conta como concluído.
+    /// </summary>
+    public static SituacaoPedido Atendido(SituacaoPedido p, DateTime? sincronizadoEm) =>
+        p.Status == Pendente && sincronizadoEm is DateTime fim ? p with { Status = Concluido, ConcluidoEm = fim } : p;
 
     public async Task<ResultadoPedido> PedirAsync(Cliente cliente, string? usuario, DateTime agora, CancellationToken ct = default)
     {

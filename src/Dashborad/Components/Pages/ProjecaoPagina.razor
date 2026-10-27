@@ -1,0 +1,265 @@
+@page "/projecao"
+@attribute [Authorize(Roles = Perfis.Gestao)]
+@implements IDisposable
+@inject ClienteAtualService ClienteAtual
+@inject IDbContextFactory<ApplicationDbContext> Fabrica
+@inject AcessoService Acessos
+@inject IJSRuntime JS
+
+<PageTitle>Projeção · Vogel</PageTitle>
+
+<SubAbas Area="Gestão" />
+
+<div class="cabecalho-pagina">
+    <h1>Projeção@(empresa is not null ? $" · {empresa.Nome}" : "")</h1>
+</div>
+
+@if (empresa is null)
+{
+    <div class="cartao text-muted">@(acesso.EhVogel ? "Escolha o cliente no topo da tela." : "Seu usuário não está ligado a uma empresa ativa. Fale com a Vogel.")</div>
+}
+else if (projecao is null)
+{
+    <div class="cartao text-muted">Sem meses fechados na DRE para projetar. <a href="dre">Abrir a DRE</a></div>
+}
+else
+{
+    var p = projecao;
+    var e = p.Estrutura;
+    <div class="row g-3 mb-3">
+        <div class="col-6 col-lg-3"><div class="cartao kpi h-100">
+            <div class="rotulo"><span class="dica" title="Meses fechados (realizado) + meses que faltam (projetados).">Receita bruta prevista · @p.Ano</span></div>
+            <div class="valor">@p.Receita.ToString("C0")</div>
+            @if (p.ReceitaAnoAnterior is decimal ant && ant > 0) { <div class="detalhe"><span class="@(p.Receita >= ant ? "positivo" : "negativo")">@((p.Receita / ant - 1).ToString("+0.0%;-0.0%"))</span> vs @(p.Ano - 1) (@ant.ToString("C0"))</div> }
+        </div></div>
+        <div class="col-6 col-lg-3"><div class="cartao kpi h-100">
+            <div class="rotulo"><span class="dica" title="Realizado nos meses fechados + estimado nos demais pela estrutura de custos dos últimos 12 meses.">Lucro líquido previsto · @p.Ano</span></div>
+            <div class="valor @(p.LucroLiquido < 0 ? "negativo" : "")">@p.LucroLiquido.ToString("C0")</div>
+            <div class="detalhe">margem líquida @(p.Receita != 0 ? (p.LucroLiquido / p.Receita).ToString("P1") : "—")</div>
+        </div></div>
+        <div class="col-6 col-lg-3"><div class="cartao kpi h-100">
+            <div class="rotulo"><span class="dica" title="Meses fechados de @p.Ano contra os mesmos meses de @(p.Ano - 1). Os meses que faltam = mesmo mês do ano anterior × (1 + crescimento): mantém a sazonalidade.">Crescimento no ano</span></div>
+            @if (p.CrescimentoRealizado is decimal cr)
+            {
+                <div class="valor @(cr < 0 ? "negativo" : "positivo")">@cr.ToString("+0.0%;-0.0%")</div>
+                <div class="detalhe">@p.MesesRealizados mês(es) fechado(s) vs mesmos meses de @(p.Ano - 1)</div>
+            }
+            else
+            {
+                <div class="valor">—</div>
+                <div class="detalhe">Sem o ano anterior completo: projeta pela média dos últimos 3 meses.</div>
+            }
+        </div></div>
+        <div class="col-6 col-lg-3"><div class="cartao kpi h-100">
+            <div class="rotulo"><span class="dica" title="Dos últimos @e.Meses meses fechados: o que sobra de cada venda depois de impostos, devoluções, CMV e despesas variáveis.">Estrutura de custos</span></div>
+            <div class="valor">@e.MargemContribuicaoPct.ToString("P1")</div>
+            <div class="detalhe">margem de contribuição · fixos @e.FixosMes.ToString("C0")/mês</div>
+            <div class="detalhe">deduções @e.DeducoesPct.ToString("P1") · CMV @e.CmvPct.ToString("P1") · variáveis @e.VariaveisPct.ToString("P1")</div>
+        </div></div>
+    </div>
+
+    <div class="cartao">
+        <h2 class="h5">Receita mês a mês · @p.Ano</h2>
+        <div class="area-grafico"><canvas id="graficoProjecao"></canvas></div>
+        <div class="table-wrap mt-3">
+            <table class="table table-sm align-middle m-0">
+                <thead><tr><th>Mês</th><th></th><th class="num">Receita bruta</th><th class="num">@(p.Ano - 1)</th><th class="num">Var.</th><th class="num">Lucro líquido</th></tr></thead>
+                <tbody>
+                    @foreach (var m in p.Meses)
+                    {
+                        <tr class="@(m.Projetado ? "text-muted" : "")">
+                            <td>@NomesMeses[m.Mes.Month - 1]</td>
+                            <td class="small">
+                                @if (!m.Projetado) { <span>realizado</span> }
+                                else if (m.ReceitaParcial is decimal parcial) { <span class="dica" title="Já vendido no mês até agora: @parcial.ToString("C0")">projetado (em andamento)</span> }
+                                else { <span>projetado</span> }
+                            </td>
+                            <td class="num">@m.Receita.ToString("N0")</td>
+                            <td class="num">@(m.ReceitaAnoAnterior?.ToString("N0") ?? "–")</td>
+                            <td class="num">@(m.ReceitaAnoAnterior is decimal ra && ra != 0 ? (m.Receita / ra - 1).ToString("+0.0%;-0.0%") : "")</td>
+                            <td class="num @(m.LucroLiquido < 0 ? "negativo" : "")">@m.LucroLiquido.ToString("N0")</td>
+                        </tr>
+                    }
+                    <tr class="fw-semibold">
+                        <td>Ano</td><td></td><td class="num">@p.Receita.ToString("N0")</td><td class="num">@(p.ReceitaAnoAnterior?.ToString("N0") ?? "–")</td>
+                        <td class="num">@(p.ReceitaAnoAnterior is decimal ta && ta != 0 ? (p.Receita / ta - 1).ToString("+0.0%;-0.0%") : "")</td>
+                        <td class="num @(p.LucroLiquido < 0 ? "negativo" : "")">@p.LucroLiquido.ToString("N0")</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="cartao">
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+            <h2 class="h5 m-0 me-auto">Cenários para @p.Ano</h2>
+            <label class="small text-muted m-0" for="variacaoCenario">Variação sobre o crescimento (p.p.)</label>
+            <input id="variacaoCenario" type="number" class="form-control form-control-sm" style="width: 6rem" min="1" max="50" step="1" @bind="variacaoCenario" @bind:after="Calcular" />
+        </div>
+        <div class="table-wrap">
+            <table class="table table-sm align-middle m-0">
+                <thead><tr><th>Cenário</th><th class="num">Crescimento nos meses que faltam</th><th class="num">Receita bruta no ano</th><th class="num">vs @(p.Ano - 1)</th><th class="num">Lucro líquido</th><th class="num">Margem líquida</th></tr></thead>
+                <tbody>
+                    @foreach (var (nome, c) in cenarios)
+                    {
+                        <tr class="@(nome == "Base" ? "fw-semibold" : "")">
+                            <td>@nome</td>
+                            <td class="num">@(c.Crescimento?.ToString("+0.0%;-0.0%") ?? (nome == "Base" ? "média recente" : $"{(nome == "Pessimista" ? -variacaoCenario : variacaoCenario):+0;-0}% na média"))</td>
+                            <td class="num">@c.Receita.ToString("C0")</td>
+                            <td class="num">@(c.ReceitaAnoAnterior is decimal ca && ca != 0 ? (c.Receita / ca - 1).ToString("+0.0%;-0.0%") : "")</td>
+                            <td class="num @(c.LucroLiquido < 0 ? "negativo" : "")">@c.LucroLiquido.ToString("C0")</td>
+                            <td class="num">@(c.Receita != 0 ? (c.LucroLiquido / c.Receita).ToString("P1") : "")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="small text-muted mt-2">Os meses já fechados ficam iguais nos três cenários; só os meses que faltam mudam.</div>
+    </div>
+
+    <div class="cartao">
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+            <h2 class="h5 m-0 me-auto">Simulador: e se…?</h2>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="Zerar">Zerar</button>
+        </div>
+        <div class="row g-2 mb-3">
+            @Campo("Preço", "Aumento (+) ou desconto (−) médio nos preços. Muda a receita sem mudar o CMV.", () => precoPct, v => precoPct = v)
+            @Campo("Volume vendido", "Mais (+) ou menos (−) mercadoria vendida. Receita e CMV andam juntos.", () => volumePct, v => volumePct = v)
+            @Campo("Custo das mercadorias", "Variação no custo de compra (ex.: negociação com fornecedor).", () => cmvPct, v => cmvPct = v)
+            @Campo("Despesas fixas", "Variação nas despesas fixas (pessoal, aluguel, administrativas...).", () => fixosPct, v => fixosPct = v)
+        </div>
+        @if (simBase is not null && simulado is not null)
+        {
+            <div class="table-wrap">
+                <table class="table table-sm align-middle m-0">
+                    <thead><tr><th>Em 12 meses</th><th class="num">Hoje (últimos @e.Meses meses)</th><th class="num">Simulado</th><th class="num">Diferença</th></tr></thead>
+                    <tbody>
+                        @LinhaSim("Receita bruta", simBase.Receita, simulado.Receita, false)
+                        @LinhaSim("Lucro bruto", simBase.LucroBruto, simulado.LucroBruto, false)
+                        @LinhaSim("Margem de contribuição", simBase.MargemContribuicao, simulado.MargemContribuicao, false)
+                        <tr><td class="ps-4 small text-muted">em % da receita</td><td class="num small">@simBase.MargemContribuicaoPct?.ToString("P1")</td><td class="num small">@simulado.MargemContribuicaoPct?.ToString("P1")</td><td class="num small">@Pp(simulado.MargemContribuicaoPct, simBase.MargemContribuicaoPct)</td></tr>
+                        @LinhaSim("Despesas fixas", simBase.Fixos, simulado.Fixos, true)
+                        @LinhaSim("Lucro líquido", simBase.Resultado, simulado.Resultado, false)
+                        <tr><td class="ps-4 small text-muted">margem líquida</td><td class="num small">@simBase.MargemLiquidaPct?.ToString("P1")</td><td class="num small">@simulado.MargemLiquidaPct?.ToString("P1")</td><td class="num small">@Pp(simulado.MargemLiquidaPct, simBase.MargemLiquidaPct)</td></tr>
+                        <tr>
+                            <td><span class="dica" title="Faturamento bruto mínimo por mês para pagar as despesas fixas.">Ponto de equilíbrio / mês</span></td>
+                            <td class="num">@(simBase.PontoEquilibrioMes?.ToString("C0") ?? "—")</td>
+                            <td class="num">@(simulado.PontoEquilibrioMes?.ToString("C0") ?? "—")</td>
+                            <td class="num @(simulado.PontoEquilibrioMes < simBase.PontoEquilibrioMes ? "positivo" : simulado.PontoEquilibrioMes > simBase.PontoEquilibrioMes ? "negativo" : "")">@(simulado.PontoEquilibrioMes is decimal ps && simBase.PontoEquilibrioMes is decimal pb ? (ps - pb).ToString("+#,##0;-#,##0;0") : "")</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        }
+        <div class="small text-muted mt-2">
+            Base: a estrutura de custos dos últimos @e.Meses meses fechados, levada a 12 meses. Deduções, despesas variáveis e IR acompanham a receita;
+            o CMV acompanha o volume; as despesas fixas só mudam pelo campo delas. É uma estimativa para comparar caminhos, não uma previsão exata.
+        </div>
+    </div>
+
+    <div class="small text-muted mb-3">
+        Como a projeção é feita: os meses fechados são o realizado da <a href="dre">DRE</a>. Para os que faltam (inclusive o mês em andamento), receita = mesmo mês do ano anterior
+        × (1 + crescimento do ano até agora), o que mantém a sazonalidade da loja. Lucro dos meses projetados = receita × (margem de contribuição − IR) − despesas fixas médias.
+        Quais despesas são fixas ou variáveis se define na DRE, em "Classificar despesas".
+    </div>
+}
+
+@code {
+    private static readonly string[] NomesMeses = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+    private Acesso acesso = Acesso.Nenhum;
+    private Cliente? empresa;
+    private List<LancamentoDre> lancamentos = [];
+    private ProjecaoAno? projecao;
+    private List<(string Nome, ProjecaoAno Projecao)> cenarios = [];
+    private decimal variacaoCenario = 5;
+    private decimal precoPct, volumePct, cmvPct, fixosPct;
+    private ResultadoSimulado? simBase, simulado;
+    private bool desenhar;
+
+    protected override async Task OnInitializedAsync()
+    {
+        acesso = await Acessos.ObterAsync();
+        ClienteAtual.Mudou += AoMudarCliente;
+        await AbrirEmpresa();
+    }
+
+    private Task AoMudarCliente() => InvokeAsync(async () => { await AbrirEmpresa(); StateHasChanged(); });
+
+    public void Dispose() => ClienteAtual.Mudou -= AoMudarCliente;
+
+    private async Task AbrirEmpresa()
+    {
+        empresa = null;
+        projecao = null;
+        var id = acesso.EhCliente ? acesso.ClienteId : ClienteAtual.Filtro;
+        if (id is not int clienteId || !acesso.PodeVerCliente(clienteId)) return;
+        await using var db = await Fabrica.CreateDbContextAsync();
+        empresa = await acesso.Filtrar(db.Clientes).AsNoTracking().FirstOrDefaultAsync(c => c.Id == clienteId);
+        if (empresa is null) return;
+        var ano = DateTime.Today.Year;
+        // Dois anos antes: ano anterior para a sazonalidade e últimos 12 meses fechados para a estrutura de custos
+        lancamentos = await DreDados.CarregarAsync(db, clienteId, new DateOnly(ano - 2, 1, 1), new DateOnly(ano, 12, 1));
+        Calcular();
+    }
+
+    private void Calcular()
+    {
+        var hoje = DateOnly.FromDateTime(DateTime.Today);
+        var ano = hoje.Year;
+        projecao = Projecao.Projetar(lancamentos, ano, hoje);
+        var delta = Math.Clamp(variacaoCenario, 0, 50) / 100m;
+        cenarios = projecao is null ? [] :
+        [
+            ("Pessimista", Projecao.Projetar(lancamentos, ano, hoje, -delta)!),
+            ("Base", projecao),
+            ("Otimista", Projecao.Projetar(lancamentos, ano, hoje, delta)!)
+        ];
+        Simular();
+        desenhar = projecao is not null;
+    }
+
+    private void Simular()
+    {
+        if (projecao is null) { simBase = simulado = null; return; }
+        simBase = Projecao.Simular(projecao.Estrutura);
+        simulado = Projecao.Simular(projecao.Estrutura, precoPct / 100, volumePct / 100, cmvPct / 100, fixosPct / 100);
+    }
+
+    private void Zerar() { precoPct = volumePct = cmvPct = fixosPct = 0; Simular(); }
+
+    private RenderFragment Campo(string nome, string dica, Func<decimal> ler, Action<decimal> gravar) => __builder =>
+    {
+        <div class="col-6 col-lg-3">
+            <label class="form-label small mb-1"><span class="dica" title="@dica">@nome</span> (%)</label>
+            <input type="number" class="form-control form-control-sm" step="0.5" min="-90" max="200" value="@ler().ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                   @onchange="ev => { if (decimal.TryParse(ev.Value?.ToString(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var v)) { gravar(Math.Clamp(v, -90, 200)); Simular(); } }" />
+        </div>
+    };
+
+    private static RenderFragment LinhaSim(string nome, decimal hoje, decimal simulado, bool despesa) => __builder =>
+    {
+        var dif = simulado - hoje;
+        var melhora = despesa ? dif < 0 : dif > 0;
+        <tr>
+            <td>@nome</td>
+            <td class="num @(hoje < 0 ? "negativo" : "")">@hoje.ToString("C0")</td>
+            <td class="num @(simulado < 0 ? "negativo" : "")">@simulado.ToString("C0")</td>
+            <td class="num @(dif == 0 ? "" : melhora ? "positivo" : "negativo")">@(dif == 0 ? "–" : dif.ToString("+#,##0;-#,##0"))@(hoje != 0 && dif != 0 ? $" ({dif / Math.Abs(hoje):+0.0%;-0.0%})" : "")</td>
+        </tr>
+    };
+
+    private static string Pp(decimal? a, decimal? b) => a is decimal x && b is decimal y && x != y ? $"{(x - y) * 100:+0.0;-0.0} p.p." : "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!desenhar || projecao is null) return;
+        desenhar = false;
+        var m = projecao.Meses;
+        await JS.InvokeVoidAsync("portal.grafico", "graficoProjecao", NomesMeses, new object[]
+        {
+            new { label = $"Realizado {projecao.Ano}", data = m.Select(x => x.Projetado ? (decimal?)null : x.Receita).ToArray(), tipo = "bar", cor = "--grafico-1" },
+            new { label = $"Projetado {projecao.Ano}", data = m.Select(x => x.Projetado ? x.Receita : (decimal?)null).ToArray(), tipo = "bar", cor = "--grafico-2" },
+            new { label = $"{projecao.Ano - 1}", data = m.Select(x => x.ReceitaAnoAnterior).ToArray(), tipo = "line", cor = "--grafico-3" }
+        });
+    }
+}

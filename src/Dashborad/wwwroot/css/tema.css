@@ -122,3 +122,21 @@ a, .btn-link { color: var(--cor-primaria); }
 .tabela-metas tr:not(.grupos) th:nth-child(2), .tabela-metas tr:not(.grupos) th:nth-child(8), .tabela-metas tr:not(.grupos) th:nth-child(14), .tabela-metas tr:not(.grupos) th:nth-child(17),
 .tabela-metas tr.grupos th:not(:first-child) { border-left: 2px solid color-mix(in srgb, var(--cor-primaria) 25%, transparent); }
 .tabela-metas input { min-width: 6.5rem; }
+
+/* Sub-abas de cada área (Comercial, Financeiro, Gestão) */
+.sub-abas { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; border-bottom: 1px solid var(--cor-borda); padding-bottom: .1rem; }
+.sub-abas-area { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--cor-texto-suave); margin-right: .5rem; }
+.sub-aba { padding: .4rem .8rem; border-radius: 8px 8px 0 0; color: var(--cor-texto-suave); text-decoration: none; font-size: .9rem; border-bottom: 2px solid transparent; }
+a.sub-aba:hover { color: var(--cor-texto); background: rgba(34,179,200,.08); }
+a.sub-aba.active { color: var(--cor-texto); font-weight: 600; border-bottom-color: var(--cor-destaque); }
+.sub-aba.em-breve { opacity: .55; cursor: default; }
+.sub-aba.em-breve::after { content: "em breve"; font-size: .62rem; margin-left: .35rem; padding: .05rem .35rem; border-radius: 6px; background: var(--cor-borda); vertical-align: middle; }
+
+/* DRE */
+.table-dre tr.detalhe-conta td { font-size: .82rem; color: var(--cor-texto-suave); }
+.table-dre tr.detalhe-conta td:first-child { padding-left: 1.6rem; }
+.table-dre tr.margem td { font-style: italic; color: var(--cor-texto-suave); }
+.table-dre tr.margem.primeira td { border-top: 2px solid var(--cor-borda); }
+.table-dre .abre { cursor: pointer; }
+.table-dre .abre:hover { color: var(--cor-destaque); }
+.table-dre td.ah { font-size: .8rem; }
