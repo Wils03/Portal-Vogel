@@ -156,6 +156,10 @@
                         </div>
                         <div class="detalhe mt-1"><a href="precificacao?problemas=1">Revisar na Precificação</a></div>
                     }
+                    @if (p.RegraSuspeita > 0)
+                    {
+                        <div class="detalhe mt-1"><span class="dica" title="Lucro desejado de 50% ou mais sobre o preço de venda no cadastro do ERP: provavelmente um markup sobre o custo com a base errada. Não entram em &quot;abaixo da regra&quot;.">@p.RegraSuspeita.ToString("N0") com regra suspeita no ERP</span> · <a href="precificacao?suspeita=1">ver lista</a></div>
+                    }
                 </div>
             </div>
         }

@@ -47,7 +47,8 @@ public sealed record ResumoVendas(
 
 /// <summary>Preços que precisam de atenção (só produtos com venda). Um produto pode ter mais de um motivo.</summary>
 /// <param name="VendaMesEmRisco">Venda mensal (preço × qtd/mês) dos produtos com problema.</param>
-public sealed record ResumoPrecos(int ComVenda, int ComProblema, int AbaixoRegra, int MargemNegativa, int SemCusto, decimal VendaMesEmRisco);
+/// <param name="RegraSuspeita">Produtos com venda e regra do ERP suspeita (lucro ≥ 50% sobre o preço de venda): fora dos problemas, para corrigir no ERP.</param>
+public sealed record ResumoPrecos(int ComVenda, int ComProblema, int AbaixoRegra, int MargemNegativa, int SemCusto, decimal VendaMesEmRisco, int RegraSuspeita = 0);
 
 public static class PainelResumo
 {
@@ -122,6 +123,7 @@ public static class PainelResumo
             problema.Count(CalculoPreco.AbaixoDaRegra),
             problema.Count(a => a.MargemContribuicao < 0),
             problema.Count(a => a.Produto.Custo <= 0),
-            problema.Sum(a => a.Produto.PrecoAtual * a.Produto.QtdMes));
+            problema.Sum(a => a.Produto.PrecoAtual * a.Produto.QtdMes),
+            comVenda.Count(a => CalculoPreco.RegraSuspeita(a.Produto)));
     }
 }

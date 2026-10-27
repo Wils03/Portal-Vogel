@@ -6,6 +6,8 @@
 --       BASE (ERP): só leitura (para clientes com rotinas ainda direto na BASE).  BASELV: só leitura das tabelas LV_.
 -- Pode rodar mais de uma vez: só cria o que falta e reaplica as permissões. Não mexe em mais nada.
 -- ANTES DE RODAR: troque as duas senhas abaixo (e guarde num lugar seguro). Ajuste @BaseErp se preciso.
+-- A senha precisa passar na política do Windows do servidor: use 12+ caracteres com maiúsculas, minúsculas, números e símbolo.
+-- Troque só na janela do SSMS e feche SEM SALVAR (a senha não deve ficar no arquivo do projeto).
 -- Rodar no SSMS como administrador (ex.: sa), DEPOIS do passo 2. Guia: docs/implantacao/GUIA.md
 -- =====================================================================================
 USE master;
@@ -33,8 +35,15 @@ DECLARE @sql nvarchar(max);
 IF SUSER_ID(N'vogel_sincronizador') IS NULL
 BEGIN
     SET @sql = N'CREATE LOGIN vogel_sincronizador WITH PASSWORD = N''' + REPLACE(@SenhaSincronizador, N'''', N'''''') + N''', CHECK_POLICY = ON, DEFAULT_DATABASE = BASELV;';
-    EXEC (@sql);
-    PRINT 'Login criado: vogel_sincronizador';
+    BEGIN TRY
+        EXEC (@sql);
+        PRINT 'Login criado: vogel_sincronizador';
+    END TRY
+    BEGIN CATCH
+        DECLARE @erroSinc nvarchar(2048) = ERROR_MESSAGE();
+        RAISERROR('Não foi possível criar o login vogel_sincronizador: %s Nada foi criado. Se for a política de senhas, use uma senha mais forte (12+ caracteres, com maiúsculas, minúsculas, números e símbolo) e rode de novo.', 16, 1, @erroSinc);
+        RETURN;
+    END CATCH
 END
 SET @sql = N'USE ' + QUOTENAME(@BaseErp) + N';
     IF USER_ID(N''vogel_sincronizador'') IS NULL CREATE USER vogel_sincronizador FOR LOGIN vogel_sincronizador;
@@ -58,8 +67,15 @@ BEGIN
     IF SUSER_ID(N'vogel_portal') IS NULL
     BEGIN
         SET @sql = N'CREATE LOGIN vogel_portal WITH PASSWORD = N''' + REPLACE(@SenhaPortal, N'''', N'''''') + N''', CHECK_POLICY = ON, DEFAULT_DATABASE = ' + QUOTENAME(@BaseErp) + N';';
-        EXEC (@sql);
-        PRINT 'Login criado: vogel_portal';
+        BEGIN TRY
+            EXEC (@sql);
+            PRINT 'Login criado: vogel_portal';
+        END TRY
+        BEGIN CATCH
+            DECLARE @erroPortal nvarchar(2048) = ERROR_MESSAGE();
+            RAISERROR('Não foi possível criar o login vogel_portal: %s O vogel_sincronizador ficou pronto. Use uma senha mais forte para o portal (12+ caracteres, com maiúsculas, minúsculas, números e símbolo) e rode de novo.', 16, 1, @erroPortal);
+            RETURN;
+        END CATCH
     END
     SET @sql = N'USE ' + QUOTENAME(@BaseErp) + N';
         IF USER_ID(N''vogel_portal'') IS NULL CREATE USER vogel_portal FOR LOGIN vogel_portal;

@@ -226,6 +226,20 @@ public static class ImportacaoDados
         }));
     }
 
+    /// <summary>
+    /// "Lucro desejado sobre" em branco no ERP: usa a base que predomina nos produtos da própria empresa
+    /// (ex.: quem forma preço por markup tem quase tudo "Custo"; o branco se comporta igual). Sem nenhuma base informada, fica em branco.
+    /// </summary>
+    public static void PreencherBaseDoLucro(List<Produto> produtos)
+    {
+        var sobreCusto = produtos.Count(p => p.LucroSobreCusto == true);
+        var sobreVenda = produtos.Count(p => p.LucroSobreCusto == false);
+        if (sobreCusto == 0 && sobreVenda == 0) return;
+        var predominante = sobreCusto > sobreVenda;
+        foreach (var p in produtos.Where(p => p.LucroSobreCusto is null && p.LucroDesejadoPct is not null))
+            p.LucroSobreCusto = predominante;
+    }
+
     /// <summary>Troca todos os produtos da empresa pelos novos (linhas sem código e sem descrição são ignoradas).</summary>
     public static async Task<List<Produto>> SubstituirProdutosAsync(IDbContextFactory<ApplicationDbContext> fabrica, int clienteId, IEnumerable<Produto> novos, CancellationToken ct = default)
     {
@@ -236,6 +250,7 @@ public static class ImportacaoDados
             p.Codigo = p.Codigo.Length > 60 ? p.Codigo[..60] : p.Codigo;
             p.Descricao = p.Descricao.Length > 200 ? p.Descricao[..200] : p.Descricao;
         }
+        PreencherBaseDoLucro(lista);
         await using var db = await fabrica.CreateDbContextAsync(ct);
         await db.Produtos.Where(p => p.ClienteId == clienteId).ExecuteDeleteAsync(ct);
         db.Produtos.AddRange(lista);

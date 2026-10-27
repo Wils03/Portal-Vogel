@@ -125,6 +125,9 @@ Tudo a partir da **base de dados de cada cliente**, apresentado de forma acessí
 - [x] "Classificar despesas" na DRE: cada conta como fixa, variável ou depreciação (sugestão pelo nome: comissões, taxas de cartão, fretes, depreciação); vale para a DRE, o ponto de equilíbrio e o Painel
 - [x] Ponto de equilíbrio em página própria (área Gestão), com as despesas variáveis na margem de contribuição
 - [x] **Projeção** (área Gestão): ano realizado + projetado pela sazonalidade do ano anterior × crescimento do ano; cenários pessimista/base/otimista; simulador "e se" (preço, volume, CMV, despesas fixas)
+- [x] **Reforma tributária na DRE**: impostos sobre vendas separados em tributos atuais (ICMS, PIS/COFINS, ISS, IPI, Simples) e da reforma (CBS, IBS, Imposto Seletivo) pelo nome da conta; carga tributária sobre vendas (mês a mês e comparativo); guia de CBS/IBS lançada como despesa vira imposto sobre vendas; calendário da transição 2026–2033; simulador da Projeção com variação da carga (p.p.)
+- [ ] Reforma: ler IBS/CBS direto das notas quando o ERP gravar os valores (hoje só tem `cClassTrib` e a tabela `Classtrib ibscbs`); créditos de IBS/CBS das compras no CMV
+- [x] Precificação: "Regra suspeita" (lucro desejado ≥ 50% sobre o preço de venda no ERP, provável markup com a base errada): não conta como abaixo da regra; filtro próprio e aviso no Painel para corrigir no ERP
 - [x] README da raiz com fluxo dos dados, arquivos, tabelas do ERP lidas, views usadas só como referência, tabelas da BASELV e do PORTAL_VG
 - [ ] Revisar com o cliente a classificação das despesas do MC (72 contas em 2026)
 - [ ] ~~Capital de giro (PMR, PME, PMP, ciclo de caixa)~~: deixado de lado por decisão do usuário (27/10/2026)

@@ -137,7 +137,7 @@ if (args.Contains("--painel"))
     var rm = await ResumoMeta.CarregarAsync(dbPainel, idPainel, DateOnly.FromDateTime(DateTime.Today));
     Console.WriteLine(rm is null ? "Meta: sem meta no mês" :
         $"Meta {rm.Mes:MM/yyyy} até {rm.DataFinal:dd/MM}: venda {rm.Venda:N2} de {rm.Meta:N2} ({rm.Atingimento:P1}) ritmo={rm.Ritmo:N2} dias={rm.DiasUteisAcumulado}/{rm.DiasUteisMes} faltaPorDia={rm.FaltaPorDia:N2} projeção={rm.Projecao:N2} vendedores no ritmo={rm.VendedoresNaMeta}/{rm.VendedoresComMeta}");
-    Console.WriteLine($"Preços: {rp.ComProblema} de {rp.ComVenda} (abaixo da regra {rp.AbaixoRegra}, margem negativa {rp.MargemNegativa}, sem custo {rp.SemCusto}) venda em risco {rp.VendaMesEmRisco:N2}/mês");
+    Console.WriteLine($"Preços: {rp.ComProblema} de {rp.ComVenda} (abaixo da regra {rp.AbaixoRegra}, margem negativa {rp.MargemNegativa}, sem custo {rp.SemCusto}) venda em risco {rp.VendaMesEmRisco:N2}/mês · regra suspeita {rp.RegraSuspeita}");
     return 0;
 }
 if (args.Contains("--consulta"))

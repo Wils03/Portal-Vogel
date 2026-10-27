@@ -97,7 +97,7 @@ else
                         <tbody>
                             @foreach (var l in Visiveis())
                             {
-                                @LinhaMensal(l.Titulo, l.Meses, l.Total, l.Grupo, conta: false)
+                                @LinhaMensal(l.Titulo, l.Meses, l.Total, l.Grupo, conta: l.Detalhe)
                                 @if (l.Grupo is GrupoDre g && abertos.Contains(l.Titulo))
                                 {
                                     @foreach (var (conta, serie) in Contas(l))
@@ -118,6 +118,15 @@ else
                                 </tr>
                                 primeira = false;
                             }
+                            @{
+                                var carga = Linha(Dre.CargaTributaria.Linha).Meses;
+                                var rbc = Linha(Dre.Nomes[GrupoDre.ReceitaBruta]).Meses;
+                            }
+                            <tr class="margem">
+                                <td class="text-nowrap"><span class="dica" title="@Dre.CargaTributaria.Dica">@Dre.CargaTributaria.Nome</span></td>
+                                @for (var i = 0; i < 12; i++) { <td class="num">@(rbc[i] != 0 ? (carga[i] / rbc[i]).ToString("P1") : "–")</td> }
+                                <td class="num">@(rbc.Sum() != 0 ? (carga.Sum() / rbc.Sum()).ToString("P1") : "–")</td><td></td>
+                            </tr>
                         </tbody>
                     </table>
                 }
@@ -139,7 +148,7 @@ else
                             @foreach (var l in Visiveis())
                             {
                                 var indice = linhas.IndexOf(l);
-                                @LinhaComparada(l.Titulo, new Serie(l.Meses, linhasAnt![indice].Meses), l.Total, l.Negativa, l.Grupo, conta: false)
+                                @LinhaComparada(l.Titulo, new Serie(l.Meses, linhasAnt![indice].Meses), l.Total, l.Negativa, l.Grupo, conta: l.Detalhe)
                                 @if (l.Grupo is GrupoDre && abertos.Contains(l.Titulo))
                                 {
                                     @foreach (var (conta, serie) in Contas(l))
@@ -164,6 +173,19 @@ else
                                 </tr>
                                 primeiraM = false;
                             }
+                            @{
+                                var sc = SerieDe(Dre.CargaTributaria.Linha);
+                                var rc = SerieDe(Dre.Nomes[GrupoDre.ReceitaBruta]);
+                                decimal? Carga(Coluna c) => Valor(rc, c) is var v && v != 0 ? Valor(sc, c) / v : null;
+                            }
+                            <tr class="margem">
+                                <td class="text-nowrap"><span class="dica" title="@Dre.CargaTributaria.Dica">@Dre.CargaTributaria.Nome</span></td>
+                                <td class="num">@(Carga(Coluna.Mes)?.ToString("P1") ?? "–")</td><td></td>
+                                <td class="num">@(Carga(Coluna.MesAnterior)?.ToString("P1") ?? "–")</td>@DiferencaPp(Carga(Coluna.Mes), Carga(Coluna.MesAnterior), quantoMenorMelhor: true)
+                                <td class="num">@(Carga(Coluna.MesAnoAnterior)?.ToString("P1") ?? "–")</td>@DiferencaPp(Carga(Coluna.Mes), Carga(Coluna.MesAnoAnterior), quantoMenorMelhor: true)
+                                <td class="num">@(Carga(Coluna.Acumulado)?.ToString("P1") ?? "–")</td><td></td>
+                                <td class="num">@(Carga(Coluna.AcumuladoAnoAnterior)?.ToString("P1") ?? "–")</td>@DiferencaPp(Carga(Coluna.Acumulado), Carga(Coluna.AcumuladoAnoAnterior), quantoMenorMelhor: true)
+                            </tr>
                         </tbody>
                     </table>
                 }
@@ -175,12 +197,56 @@ else
             </div>
         </div>
 
+        <div class="cartao">
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+                <h2 class="h5 m-0 me-auto">Reforma tributária</h2>
+                @{
+                    var rbR = Periodo(Dre.Nomes[GrupoDre.ReceitaBruta]);
+                    var atuaisR = Periodo(Dre.TributosAtuais);
+                    var reformaR = Periodo(Dre.TributosReforma);
+                }
+                @if (rbR != 0)
+                {
+                    <span class="small">Carga sobre vendas no período: <strong>@(((atuaisR + reformaR) / rbR).ToString("P1"))</strong>
+                        (atuais @((atuaisR / rbR).ToString("P1")) · reforma @((reformaR / rbR).ToString("P1")))</span>
+                }
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => mostrarReforma = !mostrarReforma">@(mostrarReforma ? "Fechar" : "Como a DRE trata")</button>
+            </div>
+            @if (mostrarReforma)
+            {
+                <div class="small mt-2">
+                    <p class="mb-2">
+                        Na transição (2026 a 2032) os dois sistemas convivem. A DRE separa os <strong>impostos sobre vendas</strong> em
+                        <strong>tributos atuais</strong> (ICMS, PIS/COFINS, ISS, IPI, Simples) e <strong>tributos da reforma</strong> (CBS, IBS e Imposto Seletivo),
+                        pelo nome da conta. A <strong>carga tributária sobre vendas</strong> aparece abaixo das margens, mês a mês e no comparativo.
+                        Guias de CBS/IBS lançadas como despesa vão sozinhas para "imposto sobre vendas" (dá para conferir em "Classificar despesas").
+                    </p>
+                    <div class="table-wrap">
+                        <table class="table table-sm m-0">
+                            <thead><tr><th>Ano</th><th>O que muda</th></tr></thead>
+                            <tbody>
+                                @foreach (var (anoReforma, texto) in CalendarioReforma)
+                                {
+                                    <tr class="@(anoReforma == DateTime.Today.Year.ToString() ? "fw-semibold" : "")"><td class="text-nowrap">@anoReforma</td><td>@texto</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="mt-2 mb-0 text-muted">
+                        IBS e CBS são calculados "por fora" do preço e geram <strong>crédito amplo</strong> nas compras: para a margem, vale o imposto da venda menos o crédito das compras.
+                        Quando o ERP passar a gravar os valores de IBS/CBS das notas (hoje ele já tem a classificação tributária <code>cClassTrib</code>), a DRE pode ler direto das notas.
+                        Para estimar o efeito na margem, use o campo "Impostos sobre vendas (p.p.)" no simulador da <a href="projecao">Projeção</a>.
+                    </p>
+                </div>
+            }
+        </div>
+
         @if (acesso.Altera && despesas.Count > 0)
         {
             <div class="cartao">
                 <div class="d-flex flex-wrap gap-2 align-items-center">
                     <h2 class="h5 m-0 me-auto">Classificar despesas</h2>
-                    <span class="small text-muted">@despesas.Count(d => d.Grupo == GrupoDre.DespesasVariaveis) variável(is) · @despesas.Count(d => d.Grupo == GrupoDre.Depreciacao) depreciação · @despesas.Count(d => d.Grupo == GrupoDre.DespesasOperacionais) fixa(s)</span>
+                    <span class="small text-muted">@despesas.Count(d => d.Grupo == GrupoDre.DespesasVariaveis) variável(is) · @despesas.Count(d => d.Grupo == GrupoDre.Depreciacao) depreciação · @despesas.Count(d => d.Grupo == GrupoDre.DespesasOperacionais) fixa(s)@(despesas.Any(d => d.Grupo == GrupoDre.Deducoes) ? $" · {despesas.Count(d => d.Grupo == GrupoDre.Deducoes)} imposto(s) sobre vendas" : "")</span>
                     <button class="btn btn-sm btn-outline-secondary" @onclick="() => mostrarClassificacao = !mostrarClassificacao">@(mostrarClassificacao ? "Fechar" : "Abrir")</button>
                 </div>
                 @if (mostrarClassificacao)
@@ -188,6 +254,7 @@ else
                     <div class="small text-muted my-2">
                         Despesas <strong>variáveis</strong> acompanham a venda (comissões, taxas de cartão, fretes de entrega) e entram na margem de contribuição.
                         <strong>Fixas</strong> existem mesmo sem venda (salários, aluguel, sistemas). <strong>Depreciação</strong> fica entre o EBITDA e o resultado operacional.
+                        <strong>Imposto sobre vendas</strong>: guia de tributo sobre a venda que veio como despesa (ex.: CBS e IBS da reforma tributária; contas com esses nomes já vêm sugeridas assim).
                         Contas que ninguém marcou seguem a sugestão pelo nome. A classificação vale para todos os anos e para o ponto de equilíbrio.
                     </div>
                     <div class="table-wrap" style="max-height: 28rem">
@@ -204,6 +271,7 @@ else
                                                 <option value="@((int)GrupoDre.DespesasOperacionais)">Fixa</option>
                                                 <option value="@((int)GrupoDre.DespesasVariaveis)">Variável</option>
                                                 <option value="@((int)GrupoDre.Depreciacao)">Depreciação</option>
+                                                <option value="@((int)GrupoDre.Deducoes)">Imposto sobre vendas</option>
                                             </select>
                                         </td>
                                         <td class="small text-muted">@(d.Alterada ? "alterada (salvar)" : d.Salva ? "marcada" : d.Sugerida ? "sugerida pelo nome" : "")</td>
@@ -302,7 +370,17 @@ else
     private int ano = DateTime.Today.Year;
     private List<LancamentoDre> lancamentos = [], lancamentosAnt = [];
     private List<LinhaDre>? linhas, linhasAnt;
-    private bool mostrarSql, ocupado, desenharGrafico, comparativo, mostrarClassificacao;
+    private bool mostrarSql, ocupado, desenharGrafico, comparativo, mostrarClassificacao, mostrarReforma;
+
+    /// <summary>Transição da reforma tributária (EC 132/2023 e LC 214/2025).</summary>
+    private static readonly (string Ano, string Texto)[] CalendarioReforma =
+    [
+        ("2026", "Ano de teste: CBS de 0,9% e IBS de 0,1% destacados na nota, compensados com PIS/COFINS (sem aumento de carga). Optantes do Simples dispensados."),
+        ("2027", "CBS passa a valer de verdade; PIS e COFINS acabam; IPI zerado (exceto Zona Franca); começa o Imposto Seletivo. IBS segue em 0,1%."),
+        ("2028", "Igual a 2027."),
+        ("2029–2032", "ICMS e ISS diminuem aos poucos (90%, 80%, 70% e 60% das alíquotas) e o IBS sobe na mesma proporção."),
+        ("2033", "ICMS e ISS acabam; IBS e CBS integrais.")
+    ];
     private string? sqlDre, erro, aviso;
     private int sqlClienteId;
     private Acesso acesso = Acesso.Nenhum;
@@ -337,7 +415,7 @@ else
     private decimal PeriodoAnt(string titulo) => comparativo ? Valor(SerieDe(titulo), Coluna.MesAnoAnterior) : linhasAnt!.First(l => l.Titulo == titulo).Meses.Take(ultimoMes).Sum();
 
     /// <summary>Linhas de total sempre; linhas de grupo só se tiverem valor no ano ou no anterior.</summary>
-    private IEnumerable<LinhaDre> Visiveis() => linhas!.Where((l, i) => l.Total || l.Meses.Any(v => v != 0) || linhasAnt![i].Meses.Any(v => v != 0));
+    private IEnumerable<LinhaDre> Visiveis() => linhas!.Where((l, i) => l.Total || l.Detalhe || l.Meses.Any(v => v != 0) || linhasAnt![i].Meses.Any(v => v != 0));
 
     /// <summary>Contas de uma linha de grupo, nos dois anos (impostos sobre vendas: sem as devoluções).</summary>
     private IEnumerable<(string Conta, Serie Serie)> Contas(LinhaDre l)
@@ -406,10 +484,11 @@ else
         <td class="num ah @(atual == anterior ? "" : melhora ? "positivo" : "negativo")">@v.ToString("+0.0%;-0.0%;0%")</td>
     };
 
-    private static RenderFragment DiferencaPp(decimal? atual, decimal? anterior) => __builder =>
+    private static RenderFragment DiferencaPp(decimal? atual, decimal? anterior, bool quantoMenorMelhor = false) => __builder =>
     {
         if (atual is not decimal a || anterior is not decimal b) { <td class="num ah"></td> return; }
-        <td class="num ah @(a > b ? "positivo" : a < b ? "negativo" : "")">@(((a - b) * 100).ToString("+0.0;-0.0;0")) p.p.</td>
+        var melhora = quantoMenorMelhor ? a < b : a > b;
+        <td class="num ah @(a == b ? "" : melhora ? "positivo" : "negativo")">@(((a - b) * 100).ToString("+0.0;-0.0;0")) p.p.</td>
     };
 
     // ---------------------------------------------------------------- classificação das despesas
@@ -517,7 +596,7 @@ else
         despesas = brutas.GroupBy(b => b.Conta).Select(g =>
         {
             var origem = g.First().Grupo;
-            var sugerida = origem == GrupoDre.DespesasOperacionais ? Dre.Sugerir(g.Key) : null;
+            var sugerida = origem == GrupoDre.DespesasOperacionais ? Dre.Sugerir(g.Key) : null; // inclui CBS/IBS → imposto sobre vendas
             var grupo = salvas.TryGetValue(g.Key, out var s) ? s : sugerida ?? origem;
             return new Despesa { Conta = g.Key, Total = g.Sum(x => x.Total), Grupo = grupo, Original = grupo, Salva = salvas.ContainsKey(g.Key), Sugerida = sugerida is not null };
         }).OrderByDescending(d => d.Total).ToList();

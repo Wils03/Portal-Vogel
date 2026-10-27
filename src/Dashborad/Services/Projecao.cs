@@ -104,12 +104,13 @@ public static class Projecao
     /// "E se" sobre um ano típico (os últimos 12 meses fechados): preço e volume mexem na receita; o CMV acompanha o volume
     /// (e a variação de custo); deduções, despesas variáveis e IR acompanham a receita; despesas fixas só mudam pela própria variação.
     /// </summary>
-    public static ResultadoSimulado Simular(EstruturaCustos e, decimal precoPct = 0, decimal volumePct = 0, decimal cmvPct = 0, decimal fixosPct = 0)
+    /// <param name="impostosPp">Variação da carga de impostos sobre vendas, em fração da receita (0,02 = +2 p.p.), p.ex. para simular a reforma.</param>
+    public static ResultadoSimulado Simular(EstruturaCustos e, decimal precoPct = 0, decimal volumePct = 0, decimal cmvPct = 0, decimal fixosPct = 0, decimal impostosPp = 0)
     {
         var receitaBase = e.ReceitaPeriodo * 12m / Math.Max(1, e.Meses);
         var receita = receitaBase * (1 + precoPct) * (1 + volumePct);
         var cmv = e.CmvPct * receitaBase * (1 + volumePct) * (1 + cmvPct);
-        var lucroBruto = receita * (1 - e.DeducoesPct) - cmv;
+        var lucroBruto = receita * (1 - e.DeducoesPct - impostosPp) - cmv;
         var mc = lucroBruto - receita * e.VariaveisPct;
         var fixos = e.FixosMes * 12 * (1 + fixosPct);
         var resultado = mc - fixos - receita * e.IrPct;

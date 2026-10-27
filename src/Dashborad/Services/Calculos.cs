@@ -65,7 +65,17 @@ public static class CalculoPreco
     /// <summary>Preço mais de 2% abaixo da regra do ERP conta como problema (mesmo critério do "marcar abaixo da regra").</summary>
     public const decimal ToleranciaRegra = -0.02m;
 
-    public static bool AbaixoDaRegra(AnaliseProduto a) => AvisoPrecos.DiferencaRegra(a) < ToleranciaRegra;
+    /// <summary>Lucro desejado a partir deste % "sobre o preço de venda" é tratado como cadastro suspeito no ERP.</summary>
+    public const decimal LimiteRegraSuspeita = 50m;
+
+    /// <summary>
+    /// Regra suspeita: lucro desejado de 50% ou mais SOBRE O PREÇO DE VENDA (margem) informado no ERP. Em material de construção isso quase sempre
+    /// é um markup sobre o custo cadastrado com a base errada, e a regra fica muitas vezes o custo (ex.: 82,78% + 9,25% de impostos
+    /// = preço 12,5× o custo). Não conta como "abaixo da regra"; aparece no filtro "Regra suspeita" para corrigir no ERP.
+    /// </summary>
+    public static bool RegraSuspeita(Produto p) => p.LucroSobreCusto == false && p.LucroDesejadoPct >= LimiteRegraSuspeita;
+
+    public static bool AbaixoDaRegra(AnaliseProduto a) => !RegraSuspeita(a.Produto) && AvisoPrecos.DiferencaRegra(a) < ToleranciaRegra;
 
     /// <summary>"Só problemas": margem de contribuição negativa, preço abaixo da regra do ERP ou custo zerado.</summary>
     public static bool TemProblema(AnaliseProduto a) => a.MargemContribuicao < 0 || AbaixoDaRegra(a) || a.Produto.Custo <= 0;
@@ -79,6 +89,19 @@ public static class CalculoPreco
             return imp < 1 ? p.Custo * (1 + lucro) / (1 - imp) : null;
         return imp + lucro < 1 ? p.Custo / (1 - imp - lucro) : null;
     }
+
+    /// <summary>
+    /// Lucro do preço atual na mesma base do ERP, para comparar com o lucro desejado do cadastro:
+    /// "Custo" (markup) → Preço × (1 − impostos) ÷ Custo − 1; "Preço de Venda" (margem) → 1 − impostos − Custo ÷ Preço. Em %.
+    /// </summary>
+    public static decimal? LucroAtualPct(Produto p)
+    {
+        if (p.ImpostosPct is not decimal imp || p.LucroSobreCusto is not bool sobreCusto || p.Custo <= 0 || p.PrecoAtual <= 0) return null;
+        imp /= 100m;
+        return 100m * (sobreCusto ? p.PrecoAtual * (1 - imp) / p.Custo - 1 : 1 - imp - p.Custo / p.PrecoAtual);
+    }
+
+    public static string NomeBase(bool? sobreCusto) => sobreCusto switch { true => "markup", false => "margem", _ => "" };
 }
 
 /// <summary>
@@ -96,8 +119,12 @@ public record PontoEquilibrioDre(
     decimal MargemSeguranca,
     decimal DespesasVariaveisPct = 0);
 
+/// <summary>Tributos sobre a venda, para separar o sistema atual dos novos da reforma tributária (EC 132/2023, LC 214/2025).</summary>
+public enum Tributo { Icms, PisCofins, Iss, Ipi, Simples, Cbs, Ibs, ImpostoSeletivo, Outros }
+
 /// <param name="Grupo">Grupo cujas contas podem ser abertas na tela (nulo nas linhas de total).</param>
-public record LinhaDre(string Titulo, decimal[] Meses, bool Total, bool Negativa, GrupoDre? Grupo = null)
+/// <param name="Detalhe">Linha de detalhe de outra (já somada nela): aparece recuada e não entra em nenhum total.</param>
+public record LinhaDre(string Titulo, decimal[] Meses, bool Total, bool Negativa, GrupoDre? Grupo = null, bool Detalhe = false)
 {
     public decimal Ano => Meses.Sum();
 }
@@ -120,6 +147,43 @@ public static class Dre
     /// <summary>Grupos de despesa que a Vogel/gestor reclassifica conta a conta (fixa, variável, depreciação).</summary>
     public static readonly GrupoDre[] GruposDeDespesa = [GrupoDre.DespesasOperacionais, GrupoDre.DespesasVariaveis, GrupoDre.Depreciacao];
 
+    /// <summary>Para onde uma conta de despesa pode ser reclassificada: também "imposto sobre vendas" (ex.: guia de CBS/IBS lançada como despesa).</summary>
+    public static readonly GrupoDre[] DestinosDeDespesa = [.. GruposDeDespesa, GrupoDre.Deducoes];
+
+    public const string TributosAtuais = "Tributos atuais (ICMS, PIS/COFINS, ISS, IPI, Simples)";
+    public const string TributosReforma = "Tributos da reforma (CBS, IBS, Imposto Seletivo)";
+
+    public static readonly Dictionary<Tributo, string> NomesTributos = new()
+    {
+        [Tributo.Icms] = "ICMS (inclui ST, DIFAL, FCP)", [Tributo.PisCofins] = "PIS/COFINS", [Tributo.Iss] = "ISS", [Tributo.Ipi] = "IPI",
+        [Tributo.Simples] = "Simples Nacional", [Tributo.Cbs] = "CBS (federal)", [Tributo.Ibs] = "IBS (estados e municípios)",
+        [Tributo.ImpostoSeletivo] = "Imposto Seletivo", [Tributo.Outros] = "Outros"
+    };
+
+    private static HashSet<string> Palavras(string texto)
+    {
+        var semAcento = new string(texto.Normalize(System.Text.NormalizationForm.FormD)
+            .Where(ch => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) != System.Globalization.UnicodeCategory.NonSpacingMark).ToArray());
+        return semAcento.ToLowerInvariant().Split(semAcento.Where(c => !char.IsLetterOrDigit(c)).Distinct().ToArray(), StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+    }
+
+    /// <summary>Tributo de uma conta de imposto sobre vendas, pelo nome (ex.: "CBS a recolher", "ICMS ST", "COFINS").</summary>
+    public static Tributo TributoDe(string conta)
+    {
+        var p = Palavras(conta);
+        if (p.Contains("cbs") || (p.Contains("contribuicao") && p.Contains("bens") && p.Contains("servicos"))) return Tributo.Cbs;
+        if (p.Contains("ibs") || (p.Contains("imposto") && p.Contains("bens") && p.Contains("servicos"))) return Tributo.Ibs;
+        if (p.Contains("seletivo")) return Tributo.ImpostoSeletivo;
+        if (p.Contains("icms") || p.Contains("difal") || p.Contains("fcp")) return Tributo.Icms;
+        if (p.Contains("pis") || p.Contains("cofins")) return Tributo.PisCofins;
+        if (p.Contains("iss") || p.Contains("issqn")) return Tributo.Iss;
+        if (p.Contains("ipi")) return Tributo.Ipi;
+        if (p.Contains("simples") || p.Contains("das")) return Tributo.Simples;
+        return Tributo.Outros;
+    }
+
+    public static bool DaReforma(Tributo t) => t is Tributo.Cbs or Tributo.Ibs or Tributo.ImpostoSeletivo;
+
     /// <summary>
     /// Sugestão pelo nome da conta, enquanto ninguém classificou: comissões, taxas de cartão, fretes e royalties são variáveis;
     /// depreciação/amortização vai para a linha própria. Nulo = fica fixa.
@@ -127,6 +191,7 @@ public static class Dre
     public static GrupoDre? Sugerir(string conta)
     {
         var c = Planilhas.Normalizar(conta);
+        if (DaReforma(TributoDe(conta))) return GrupoDre.Deducoes; // guia de CBS/IBS/IS lançada como despesa: é imposto sobre a venda
         if (c.Contains("deprecia") || c.Contains("amortiza")) return GrupoDre.Depreciacao;
         if (c.Contains("comiss") || c.Contains("frete") || c.Contains("royalt") || (c.Contains("taxa") && c.Contains("cart"))) return GrupoDre.DespesasVariaveis;
         return null;
@@ -140,7 +205,7 @@ public static class Dre
     {
         foreach (var l in lancamentos.Where(l => GruposDeDespesa.Contains(l.Grupo)))
         {
-            if (classes is not null && classes.TryGetValue(l.Conta, out var g) && GruposDeDespesa.Contains(g)) l.Grupo = g;
+            if (classes is not null && classes.TryGetValue(l.Conta, out var g) && DestinosDeDespesa.Contains(g)) l.Grupo = g;
             else if (l.Grupo == GrupoDre.DespesasOperacionais && Sugerir(l.Conta) is GrupoDre sugerido) l.Grupo = sugerido;
         }
         return lancamentos;
@@ -240,6 +305,10 @@ public static class Dre
     public const string ResultadoAntesIr = "= Resultado antes do IR";
     public const string LucroLiquido = "= Lucro líquido";
 
+    /// <summary>Impostos sobre vendas ÷ receita bruta (quanto maior, pior).</summary>
+    public static readonly (string Nome, string Linha, string Dica) CargaTributaria =
+        ("Carga tributária sobre vendas", ImpostosVenda, "Impostos sobre vendas ÷ receita bruta: ICMS, PIS/COFINS, ISS, IPI, Simples e, com a reforma, CBS, IBS e Imposto Seletivo.");
+
     /// <summary>Margens mostradas abaixo da DRE (linha da DRE ÷ receita bruta).</summary>
     public static readonly (string Nome, string Linha, string Dica)[] Margens =
     [
@@ -271,6 +340,12 @@ public static class Dre
         var rb = G(GrupoDre.ReceitaBruta);
         var vendaLiquida = Calc(i => rb[i] - devolucoes[i]);
         var impostosVenda = Calc(i => G(GrupoDre.Deducoes)[i] - devolucoes[i]);
+        // Reforma tributária: CBS/IBS/IS separados dos tributos atuais (convivem de 2026 a 2032)
+        var reforma = new decimal[12];
+        foreach (var l in lista)
+            if (l.Grupo == GrupoDre.Deducoes && !EhDevolucao(l.Conta) && DaReforma(TributoDe(l.Conta)))
+                reforma[l.Competencia.Month - 1] += l.Valor;
+        var atuais = Calc(i => impostosVenda[i] - reforma[i]);
         var rl = Calc(i => rb[i] - G(GrupoDre.Deducoes)[i]);
         var lb = Calc(i => rl[i] - G(GrupoDre.Cmv)[i]);
         var mc = Calc(i => lb[i] - G(GrupoDre.DespesasVariaveis)[i]);
@@ -286,6 +361,8 @@ public static class Dre
             new(Devolucoes, devolucoes, false, true),
             new(VendaLiquida, vendaLiquida, true, false),
             new(ImpostosVenda, impostosVenda, false, true, GrupoDre.Deducoes),
+            new(TributosAtuais, atuais, false, true, Detalhe: true),
+            new(TributosReforma, reforma, false, true, Detalhe: true),
             new(ReceitaLiquida, rl, true, false),
             Grupo(GrupoDre.Cmv, true),
             new(LucroBruto, lb, true, false),

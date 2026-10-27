@@ -4,7 +4,7 @@ Portal web da **Vogel Gestão e Tecnologia** para os clientes acompanharem a ges
 
 - **Portal**: ASP.NET Core Blazor Server, .NET 10, EF Core, banco próprio em SQL Server (`PORTAL_VG`). Detalhes em [src/Dashborad/README.md](src/Dashborad/README.md).
 - **SincronizadorLV**: programa de console que roda no servidor de cada cliente e grava os resultados na `BASELV`. Detalhes em [src/SincronizadorLV/README.md](src/SincronizadorLV/README.md).
-- **Implantação num cliente**: [docs/implantacao/GUIA.md](docs/implantacao/GUIA.md) (passo a passo, scripts e conferências).
+- **Implantação num cliente**: [docs/implantacao/GUIA.md](docs/implantacao/GUIA.md) (passo a passo, scripts e conferências) e o roteiro curto [docs/implantacao/COMANDOS-NOVO-CLIENTE.md](docs/implantacao/COMANDOS-NOVO-CLIENTE.md).
 - **Etapas e próximos passos**: [ROADMAP.md](ROADMAP.md).
 
 ## Como os dados chegam ao portal
@@ -34,7 +34,7 @@ Servidor do cliente                                         Máquina/servidor da
 |---|---|
 | **Painel** | Venda do mês e projeção, meta de vendas, ponto de equilíbrio, margem, preços que precisam de atenção, pendências; visão "Empresas" para a Vogel |
 | **Comercial** | Metas por vendedor (igual ao relatório "Metas" do ERP, com interruptor de permutas) · Precificação · *Vendas e Curva ABC (em breve)* |
-| **Financeiro** | DRE gerencial (mês a mês e comparativo, margens bruta/contribuição/EBITDA/líquida, contas por linha, classificação de despesas) · *Fluxo de caixa e Contas a receber e a pagar (em breve)* |
+| **Financeiro** | DRE gerencial (mês a mês e comparativo, margens bruta/contribuição/EBITDA/líquida, carga tributária, tributos atuais x reforma tributária — CBS/IBS/IS, contas por linha, classificação de despesas) · *Fluxo de caixa e Contas a receber e a pagar (em breve)* |
 | **Gestão** | Ponto de equilíbrio · Projeção (ano, cenários e simulador "e se") · *Rentabilidade (em breve)* |
 | **Acompanhamento** | Alertas, Mensagens (WhatsApp/Pagebot), Rotinas |
 | **Administração** | Clientes, Configurações, Usuários |
@@ -79,6 +79,8 @@ Os SQLs do portal leem **sempre as tabelas**, nunca as views do ERP, porque elas
 | `viewFaturamentoLV` | regras de faturamento da DRE e do Comercial (o que entra e o que sai da receita) |
 | `view_FaturamentoItensCotas` | relatório "Metas" do ERP (venda sem permuta, CMV pelo "Custo total", cotas) |
 | `fDiasUteis` / `fDiasUteisMes` | dias úteis (segunda a sexta = 1, sábado = ½, menos feriados; o relatório arredonda) |
+
+**Reforma tributária:** os impostos sobre vendas da DRE vêm das guias (contas a pagar por centro de custo) e são separados em tributos atuais e da reforma (CBS, IBS, Imposto Seletivo) **pelo nome da conta**. O ERP já tem a tabela `[Classtrib ibscbs]` e o campo `Cclasstrib` nos itens das notas, ainda sem os valores de IBS/CBS; quando tiver, a DRE pode ler direto das notas.
 
 **Nenhuma view, tabela ou função é criada na BASE do ERP.**
 

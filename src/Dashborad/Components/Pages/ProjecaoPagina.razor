@@ -127,6 +127,7 @@ else
             @Campo("Volume vendido", "Mais (+) ou menos (−) mercadoria vendida. Receita e CMV andam juntos.", () => volumePct, v => volumePct = v)
             @Campo("Custo das mercadorias", "Variação no custo de compra (ex.: negociação com fornecedor).", () => cmvPct, v => cmvPct = v)
             @Campo("Despesas fixas", "Variação nas despesas fixas (pessoal, aluguel, administrativas...).", () => fixosPct, v => fixosPct = v)
+            @Campo("Impostos sobre vendas (p.p.)", "Pontos percentuais a mais (+) ou a menos (−) de impostos sobre a receita. Ex.: simular a carga com a reforma tributária (CBS/IBS) quando as alíquotas e os créditos da loja estiverem definidos.", () => impostosPp, v => impostosPp = v, porcento: false)
         </div>
         @if (simBase is not null && simulado is not null)
         {
@@ -172,7 +173,7 @@ else
     private ProjecaoAno? projecao;
     private List<(string Nome, ProjecaoAno Projecao)> cenarios = [];
     private decimal variacaoCenario = 5;
-    private decimal precoPct, volumePct, cmvPct, fixosPct;
+    private decimal precoPct, volumePct, cmvPct, fixosPct, impostosPp;
     private ResultadoSimulado? simBase, simulado;
     private bool desenhar;
 
@@ -222,15 +223,15 @@ else
     {
         if (projecao is null) { simBase = simulado = null; return; }
         simBase = Projecao.Simular(projecao.Estrutura);
-        simulado = Projecao.Simular(projecao.Estrutura, precoPct / 100, volumePct / 100, cmvPct / 100, fixosPct / 100);
+        simulado = Projecao.Simular(projecao.Estrutura, precoPct / 100, volumePct / 100, cmvPct / 100, fixosPct / 100, impostosPp / 100);
     }
 
-    private void Zerar() { precoPct = volumePct = cmvPct = fixosPct = 0; Simular(); }
+    private void Zerar() { precoPct = volumePct = cmvPct = fixosPct = impostosPp = 0; Simular(); }
 
-    private RenderFragment Campo(string nome, string dica, Func<decimal> ler, Action<decimal> gravar) => __builder =>
+    private RenderFragment Campo(string nome, string dica, Func<decimal> ler, Action<decimal> gravar, bool porcento = true) => __builder =>
     {
-        <div class="col-6 col-lg-3">
-            <label class="form-label small mb-1"><span class="dica" title="@dica">@nome</span> (%)</label>
+        <div class="col-6 col-lg">
+            <label class="form-label small mb-1"><span class="dica" title="@dica">@nome</span>@(porcento ? " (%)" : "")</label>
             <input type="number" class="form-control form-control-sm" step="0.5" min="-90" max="200" value="@ler().ToString(System.Globalization.CultureInfo.InvariantCulture)"
                    @onchange="ev => { if (decimal.TryParse(ev.Value?.ToString(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var v)) { gravar(Math.Clamp(v, -90, 200)); Simular(); } }" />
         </div>

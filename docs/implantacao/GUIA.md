@@ -32,6 +32,7 @@ Servidor do cliente                                           Máquina do portal
 | `gerar-pacote.ps1` | 4 | PowerShell, máquina da Vogel | Gera a pasta do sincronizador |
 | `03-conferencia.sql` | 6 | SSMS, servidor do cliente | Não (só leitura) |
 | `agendar-tarefa.ps1` (vem no pacote) | 8 | PowerShell (admin), servidor do cliente | Cria a tarefa agendada |
+| `COMANDOS-NOVO-CLIENTE.md` | todos | — | Roteiro curto: só os comandos, em ordem, com checklist |
 
 ---
 

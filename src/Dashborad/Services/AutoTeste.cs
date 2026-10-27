@@ -90,6 +90,19 @@ public static class AutoTeste
             Jan(Dre.Nomes[GrupoDre.DespesasVariaveis]) == 80m && Jan(Dre.Nomes[GrupoDre.DespesasOperacionais]) == 240m && Jan(Dre.Nomes[GrupoDre.Depreciacao]) == 20m);
         Checar("DRE nova: lucro bruto 400 → margem de contribuição 320 → EBITDA 80 → resultado operacional 60 → lucro líquido 50",
             Jan(Dre.LucroBruto) == 400m && Jan(Dre.MargemContribuicao) == 320m && Jan(Dre.Ebitda) == 80m && Jan(Dre.ResultadoOperacional) == 60m && Jan(Dre.LucroLiquido) == 50m);
+        Checar("Reforma: tributos reconhecidos pelo nome da conta",
+            Dre.TributoDe("CBS a recolher") == Tributo.Cbs && Dre.TributoDe("IBS UF/Município") == Tributo.Ibs && Dre.TributoDe("Imposto Seletivo") == Tributo.ImpostoSeletivo
+            && Dre.TributoDe("ICMS ST") == Tributo.Icms && Dre.TributoDe("COFINS") == Tributo.PisCofins && Dre.TributoDe("Comissões") == Tributo.Outros
+            && Dre.TributoDe("Simples Nacional - DAS") == Tributo.Simples && Dre.TributoDe("ISSQN") == Tributo.Iss);
+        var dreReforma = Dre.Montar(Dre.Classificar(
+        [
+            L0(GrupoDre.ReceitaBruta, 1000, "Vendas"), L0(GrupoDre.Deducoes, 30, "Devoluções de vendas"), L0(GrupoDre.Deducoes, 90, "ICMS"),
+            L0(GrupoDre.Deducoes, 9, "CBS"), L0(GrupoDre.DespesasOperacionais, 1, "IBS a recolher"), L0(GrupoDre.DespesasOperacionais, 100, "Aluguel"),
+        ], null));
+        decimal JanR(string titulo) => dreReforma.Single(l => l.Titulo == titulo).Meses[0];
+        Checar("Reforma: guia de IBS lançada como despesa vira imposto sobre vendas; DRE separa tributos atuais (90) e da reforma (CBS 9 + IBS 1); devolução fora",
+            JanR(Dre.ImpostosVenda) == 100m && JanR(Dre.TributosAtuais) == 90m && JanR(Dre.TributosReforma) == 10m
+            && JanR(Dre.Nomes[GrupoDre.DespesasOperacionais]) == 100m && JanR(Dre.ReceitaLiquida) == 870m);
         var peVar = Dre.PontoEquilibrio(Dre.Classificar(
             [L0(GrupoDre.ReceitaBruta, 1000, "Vendas"), L0(GrupoDre.Deducoes, 100, "ICMS"), L0(GrupoDre.Cmv, 500, "CMV"),
              L0(GrupoDre.DespesasOperacionais, 100, "Comissões"), L0(GrupoDre.DespesasOperacionais, 150, "Aluguel")], null));
@@ -119,9 +132,37 @@ public static class AutoTeste
         Checar("Cenários: +5 p.p. só muda os meses que faltam (out–dez: 1000 × 1,15)", otimista.Meses[8].Receita == 1100m && otimista.Meses[11].Receita == 1150m);
         var simHoje = Projecao.Simular(proj.Estrutura);
         var simPreco = Projecao.Simular(proj.Estrutura, precoPct: 0.05m);
+        Checar("Simulador: +2 p.p. de impostos sobre vendas tiram 2% da receita do lucro bruto",
+            simHoje.LucroBruto - Projecao.Simular(proj.Estrutura, impostosPp: 0.02m).LucroBruto == simHoje.Receita * 0.02m);
         Checar("Simulador: +5% no preço sobe a receita 5%, o CMV não muda, e o ponto de equilíbrio cai",
             simPreco.Receita == simHoje.Receita * 1.05m && simPreco.LucroBruto - simHoje.LucroBruto == simHoje.Receita * 0.05m * 0.9m
             && simPreco.PontoEquilibrioMes < simHoje.PontoEquilibrioMes);
+
+        // Regra suspeita: lucro ≥ 50% sobre o preço de venda (provável markup com a base errada no ERP)
+        var bucha = new Produto { Codigo = "B", Descricao = "Bucha", Custo = 1.6643m, PrecoAtual = 4.5m, QtdMes = 46, ImpostosPct = 9.25m, LucroDesejadoPct = 82.78m, LucroSobreCusto = false };
+        var normal = new Produto { Codigo = "N", Descricao = "Normal", Custo = 10m, PrecoAtual = 12m, QtdMes = 10, ImpostosPct = 9.25m, LucroDesejadoPct = 30m, LucroSobreCusto = false };
+        var porCusto = new Produto { Codigo = "M", Descricao = "Markup", Custo = 10m, PrecoAtual = 12m, QtdMes = 10, ImpostosPct = 9.25m, LucroDesejadoPct = 80m, LucroSobreCusto = true };
+        var analiseSusp = CalculoPreco.Calcular(new Cliente(), [bucha, normal, porCusto]).Produtos;
+        Checar("Regra suspeita: 82,78% sobre o preço de venda dá a regra do ERP (R$ 20,88) mas não conta como abaixo da regra; 30% sobre o preço e 80% sobre o custo continuam normais",
+            Math.Round(analiseSusp[0].PrecoRegraSistema!.Value, 2) == 20.88m && CalculoPreco.RegraSuspeita(bucha) && !CalculoPreco.AbaixoDaRegra(analiseSusp[0])
+            && !CalculoPreco.RegraSuspeita(normal) && CalculoPreco.AbaixoDaRegra(analiseSusp[1]) && !CalculoPreco.RegraSuspeita(porCusto)
+            && PainelResumo.ResumirPrecos(new Cliente(), [bucha, normal, porCusto]) is { RegraSuspeita: 1 });
+
+        // "Lucro desejado sobre" em branco: segue a base predominante da empresa
+        List<Produto> deMarkup = [new() { LucroDesejadoPct = 60, LucroSobreCusto = true }, new() { LucroDesejadoPct = 70, LucroSobreCusto = true },
+                                  new() { LucroDesejadoPct = 20, LucroSobreCusto = false }, new() { LucroDesejadoPct = 80, LucroSobreCusto = null }];
+        ImportacaoDados.PreencherBaseDoLucro(deMarkup);
+        List<Produto> semBase = [new() { LucroDesejadoPct = 80, LucroSobreCusto = null }];
+        ImportacaoDados.PreencherBaseDoLucro(semBase);
+        Checar("Base do lucro em branco: empresa que forma preço por markup (maioria \"Custo\") → o branco vira markup e não é regra suspeita; sem nenhuma base, fica em branco",
+            deMarkup[3].LucroSobreCusto == true && !CalculoPreco.RegraSuspeita(deMarkup[3]) && semBase[0].LucroSobreCusto is null && !CalculoPreco.RegraSuspeita(semBase[0]));
+
+        // Lucro atual na base do ERP: custo 100, preço 160, sem impostos → markup 60%; mesmo preço como margem → 37,5%
+        var mk = new Produto { Custo = 100, PrecoAtual = 160, ImpostosPct = 0, LucroDesejadoPct = 60, LucroSobreCusto = true };
+        var mg = new Produto { Custo = 100, PrecoAtual = 160, ImpostosPct = 0, LucroDesejadoPct = 37.5m, LucroSobreCusto = false };
+        Checar("Lucro atual na base do ERP: preço 160 sobre custo 100 = markup 60% ou margem 37,5% (cada um igual à própria regra)",
+            CalculoPreco.LucroAtualPct(mk) == 60m && CalculoPreco.LucroAtualPct(mg) == 37.5m
+            && CalculoPreco.PrecoRegraSistema(mk) == 160m && CalculoPreco.PrecoRegraSistema(mg) == 160m);
 
         // Ponto de equilíbrio pela DRE: receita 1000, deduções 100, CMV 500 => MC 40%; fixos 200 => PE 500
         var pe = Dre.PontoEquilibrio(

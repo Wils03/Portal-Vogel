@@ -1,4 +1,4 @@
-@page "/precificacao"
+﻿@page "/precificacao"
 @attribute [Authorize]
 @implements IDisposable
 @inject ClienteAtualService ClienteAtual
@@ -103,6 +103,14 @@ else
                 <input class="form-control form-control-sm w-auto" placeholder="Buscar código ou descrição..." @bind="busca" @bind:event="oninput" />
                 <div class="form-check m-0"><input class="form-check-input" type="checkbox" id="soVenda" @bind="soComVenda" /><label class="form-check-label small" for="soVenda">Só com venda</label></div>
                 <div class="form-check m-0"><input class="form-check-input" type="checkbox" id="soProb" @bind="soProblemas" /><label class="form-check-label small" for="soProb">Só problemas</label></div>
+                <div class="form-check m-0" title="Lucro desejado de @CalculoPreco.LimiteRegraSuspeita.ToString("0")% ou mais SOBRE O PREÇO DE VENDA no cadastro do ERP: quase sempre um markup sobre o custo com a base errada, que faz a regra ficar muitas vezes o custo. Não contam como &quot;abaixo da regra&quot;. Exporte a lista para corrigir no ERP (campo &quot;Lucro desejado sobre&quot;).">
+                    <input class="form-check-input" type="checkbox" id="soSuspeita" @bind="soSuspeita" /><label class="form-check-label small" for="soSuspeita">Regra suspeita@(resumo is null ? "" : $" ({resumo.Produtos.Count(a => CalculoPreco.RegraSuspeita(a.Produto) && (!soComVenda || a.Produto.QtdMes > 0)):N0})")</label>
+                </div>
+                <select class="form-select form-select-sm w-auto" @bind="baseLucro" title="Base do lucro desejado no cadastro do ERP: &quot;Custo&quot; = markup, &quot;Preço de Venda&quot; = margem.">
+                    <option value="">Markup e margem</option>
+                    <option value="markup">Só markup (sobre o custo)@(resumo is null ? "" : $" ({resumo.Produtos.Count(a => a.Produto.LucroSobreCusto == true && (!soComVenda || a.Produto.QtdMes > 0)):N0})")</option>
+                    <option value="margem">Só margem (sobre o preço de venda)@(resumo is null ? "" : $" ({resumo.Produtos.Count(a => a.Produto.LucroSobreCusto == false && (!soComVenda || a.Produto.QtdMes > 0)):N0})")</option>
+                </select>
                 <select class="form-select form-select-sm w-auto" @bind="ordem">
                     <option value="faturamento">Maior venda (R$/mês)</option>
                     <option value="margem">Menor margem líquida</option>
@@ -176,6 +184,8 @@ else
                             <th class="num"><span class="dica" title="Preço de venda atual da lista 1.">Preço atual</span></th>
                             <th class="num"><span class="dica" title="Preço que o ERP do cliente sugeriria com a regra dele: custo + impostos do grupo + lucro desejado cadastrado no ERP (margem ou markup). Sem o arredondamento do ERP.">Regra ERP</span></th>
                             <th class="num"><span class="dica" title="Quanto o preço atual está acima (+) ou abaixo (−) da regra do ERP. Vermelho: mais de 2% abaixo.">Dif.</span></th>
+                            <th class="num"><span class="dica" title="Lucro desejado cadastrado no ERP, na base do produto: &quot;Custo&quot; = markup (sobre o custo), &quot;Preço de Venda&quot; = margem (sobre o preço de venda).">Lucro ERP</span></th>
+                            <th class="num"><span class="dica" title="Lucro do preço atual na MESMA base do ERP (markup ou margem), já descontados os impostos do grupo. Compare com o Lucro ERP. Vermelho: abaixo do desejado.">Lucro atual</span></th>
                             <th class="num"><span class="dica" title="Preço que cobre impostos, comissão, despesas fixas da empresa e a margem desejada.">Sugerido c/ fixas</span></th>
                             <th class="num"><span class="dica" title="Margem de contribuição: o que sobra do preço após impostos, comissão e custo, para pagar as despesas fixas.">MC %</span></th>
                             <th class="num"><span class="dica" title="Lucro real do preço atual depois de impostos, comissão, custo e despesas fixas. Negativo = vende com prejuízo.">Margem líq.</span></th>
@@ -196,8 +206,19 @@ else
                                 <td class="small text-nowrap" title="@a.Produto.GrupoPreco">@(a.Produto.ImpostosPct is decimal ip ? ip.ToString("0.##") + "%" : "—")</td>
                                 <td class="num">@a.Produto.Custo.ToString("C2")</td>
                                 <td class="num">@a.Produto.PrecoAtual.ToString("C2")</td>
-                                <td class="num" title="@TituloRegra(a.Produto)">@(a.PrecoRegraSistema?.ToString("C2") ?? "—")</td>
-                                <td class="num @(difRegra < -0.02m ? "negativo" : "")">@(difRegra?.ToString("P1") ?? "")</td>
+                                @if (CalculoPreco.RegraSuspeita(a.Produto))
+                                {
+                                    <td class="num text-muted" title="Regra suspeita: @TituloRegra(a.Produto). Provavelmente o lucro é sobre o custo (markup) e a base no ERP está como preço de venda."><i class="bi bi-exclamation-triangle text-warning me-1"></i>@(a.PrecoRegraSistema?.ToString("C2") ?? "—")</td>
+                                    <td class="num text-muted small">@(difRegra?.ToString("P1") ?? "")</td>
+                                }
+                                else
+                                {
+                                    <td class="num" title="@TituloRegra(a.Produto)">@(a.PrecoRegraSistema?.ToString("C2") ?? "—")</td>
+                                    <td class="num @(difRegra < -0.02m ? "negativo" : "")">@(difRegra?.ToString("P1") ?? "")</td>
+                                }
+                                @{ var lucroAtual = CalculoPreco.LucroAtualPct(a.Produto); }
+                                <td class="num text-nowrap">@(a.Produto.LucroDesejadoPct is decimal ld ? $"{ld:0.##}%" : "—")@if (a.Produto.LucroSobreCusto is bool sc) {<span class="badge ms-1 @(sc ? "text-bg-info" : "text-bg-secondary")">@CalculoPreco.NomeBase(sc)</span>}</td>
+                                <td class="num text-nowrap @(lucroAtual < a.Produto.LucroDesejadoPct ? "negativo" : "")">@(lucroAtual is decimal la ? $"{la:0.0}%" : "—")</td>
                                 <td class="num">@a.PrecoSugerido.ToString("C2")</td>
                                 <td class="num @(a.MargemContribuicao < 0 ? "negativo" : "")">@a.MargemContribuicaoPct.ToString("P1")</td>
                                 <td class="num @(a.MargemLiquidaPct < 0 ? "negativo" : "")">@a.MargemLiquidaPct.ToString("P1")</td>
@@ -215,6 +236,7 @@ else
         <strong>Como calcula:</strong>
         <ul class="mb-0">
             <li><strong>Regra ERP</strong>: lucro sobre o preço de venda (margem) → Custo ÷ (1 − impostos do grupo − lucro); lucro sobre o custo (markup) → Custo × (1 + lucro) ÷ (1 − impostos). Sem arredondamento de preço.</li>
+            <li><strong>Lucro ERP / Lucro atual</strong>: cada produto na base do próprio cadastro do ERP. <strong>Markup</strong> ("Custo") → Preço × (1 − impostos) ÷ Custo − 1; <strong>margem</strong> ("Preço de Venda") → 1 − impostos − Custo ÷ Preço. Em branco no ERP: segue a base que predomina na empresa.</li>
             <li><strong>Sugerido c/ fixas</strong>: Custo ÷ (1 − impostos − comissão − outros − despesas fixas% − margem desejada).</li>
             <li><strong>MC %</strong> = (Preço × (1 − impostos − comissão − outros) − Custo) ÷ Preço. <strong>Margem líquida</strong> desconta também as despesas fixas%.</li>
             <li><strong>Ponto de equilíbrio</strong> = custos fixos ÷ margem de contribuição média ponderada pela venda.</li>
@@ -228,12 +250,14 @@ else
     private Cliente? cliente;
     private List<Produto> produtos = [];
     private ResumoPrecificacao? resumo;
-    private bool mostrarSql, ocupado, soComVenda = true, soProblemas;
+    private bool mostrarSql, ocupado, soComVenda = true, soProblemas, soSuspeita;
+    private string baseLucro = "";
     private string? sqlProdutos, erro, aviso, busca;
     private string ordem = "faturamento";
     private int filial = 1;
 
     [SupplyParameterFromQuery(Name = "problemas")] public int? Problemas { get; set; }
+    [SupplyParameterFromQuery(Name = "suspeita")] public int? Suspeita { get; set; }
     private int abaixoRegra;
     private Acesso acesso = Acesso.Nenhum;
 
@@ -257,6 +281,8 @@ else
             IEnumerable<AnaliseProduto> q = resumo.Produtos;
             if (soComVenda) q = q.Where(a => a.Produto.QtdMes > 0);
             if (soProblemas) q = q.Where(CalculoPreco.TemProblema);
+            if (soSuspeita) q = q.Where(a => CalculoPreco.RegraSuspeita(a.Produto));
+            if (baseLucro != "") q = q.Where(a => a.Produto.LucroSobreCusto == (baseLucro == "markup"));
             if (!string.IsNullOrWhiteSpace(busca))
                 q = q.Where(a => a.Produto.Codigo.Contains(busca, StringComparison.OrdinalIgnoreCase)
                               || a.Produto.Descricao.Contains(busca, StringComparison.OrdinalIgnoreCase));
@@ -272,6 +298,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         if (Problemas == 1) { soProblemas = true; soComVenda = true; }
+        if (Suspeita == 1) { soSuspeita = true; soComVenda = true; }
         acesso = await Acessos.ObterAsync();
         await using var db = await Fabrica.CreateDbContextAsync();
         clientes = await acesso.Filtrar(db.Clientes).AsNoTracking().Where(c => c.Ativo).OrderBy(c => c.Nome).ToListAsync();
@@ -439,10 +466,11 @@ else
     {
         if (resumo is null || cliente is null) return;
         var bytes = Planilhas.GerarXlsx("Precificacao",
-            ["Codigo", "Descricao", "Grupo", "ImpostosPct", "LucroDesejadoPct", "LucroSobre", "Custo", "PrecoAtual", "PrecoRegraSistema", "DifRegraPct",
+            ["Codigo", "Descricao", "Grupo", "ImpostosPct", "LucroDesejadoPct", "LucroSobre", "BaseLucro", "LucroAtualPct", "Custo", "PrecoAtual", "PrecoRegraSistema", "DifRegraPct",
              "PrecoSugeridoComFixas", "MargemContribuicao", "MargemContribuicaoPct", "MargemLiquidaPct", "QtdMes", "VendaMes"],
             Filtrados.Select(a => (IReadOnlyList<object?>)[a.Produto.Codigo, a.Produto.Descricao, a.Produto.GrupoPreco, a.Produto.ImpostosPct,
                 a.Produto.LucroDesejadoPct, a.Produto.LucroSobreCusto switch { true => "Custo", false => "Preço de Venda", _ => null },
+                CalculoPreco.NomeBase(a.Produto.LucroSobreCusto), CalculoPreco.LucroAtualPct(a.Produto) is decimal la ? Math.Round(la, 2) : null,
                 a.Produto.Custo, a.Produto.PrecoAtual, a.PrecoRegraSistema is decimal r ? Math.Round(r, 2) : null, DifRegra(a),
                 Math.Round(a.PrecoSugerido, 2), Math.Round(a.MargemContribuicao, 2), a.MargemContribuicaoPct, a.MargemLiquidaPct,
                 Math.Round(a.Produto.QtdMes, 2), Math.Round(a.Produto.PrecoAtual * a.Produto.QtdMes, 2)]));

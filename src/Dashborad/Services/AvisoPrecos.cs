@@ -32,7 +32,7 @@ public static class AvisoPrecos
             t.AppendLine();
             t.AppendLine($"• *{p.Codigo}* – {p.Descricao}");
             var linha = $"  Preço atual: {Moeda(p.PrecoAtual)}";
-            if (a.PrecoRegraSistema is decimal regra)
+            if (a.PrecoRegraSistema is decimal regra && !CalculoPreco.RegraSuspeita(p))
                 linha += $" | Regra do ERP: {Moeda(regra)}" + (DiferencaRegra(a) is decimal d ? $" ({Pct(d)})" : "");
             t.AppendLine(linha);
             t.AppendLine($"  Sugerido c/ despesas fixas: {Moeda(a.PrecoSugerido)} | Margem líquida atual: {Pct(a.MargemLiquidaPct)}");
