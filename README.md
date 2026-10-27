@@ -51,8 +51,7 @@ Servidor do cliente                                         Máquina/servidor da
 | `docs/criar-portal-vg.sql` | Cria o banco `PORTAL_VG` e o login do portal |
 | `docs/dre-propria-tabelas-sqlserver.sql` | Exemplo de DRE própria de um cliente, direto nas tabelas do ERP |
 | `docs/rotinas-sqlserver.sql` | SQLs das rotinas de notas (não lançadas, rejeitadas, aguardando SEFAZ, WhatsApp do sistema) |
-| `docs/mapa-banco-base.md`, `docs/baselv-tabelas.md`, `docs/dre-sqlserver.md`, `docs/precificacao-sqlserver.md` | Mapeamento do banco do ERP e regras de cada cálculo |
-| `docs/criar-baselv-*.sql`, `docs/dre-viewFaturamentoLV-sqlserver.sql` | Versões antigas, marcadas como DESCARTADO/SUBSTITUÍDO (só histórico) |
+| `docs/mapa-banco-base.md`, `docs/dre-sqlserver.md`, `docs/precificacao-sqlserver.md` | Mapeamento do banco do ERP e regras de cada cálculo |
 | `docs/privado/` | Registro das implantações por cliente. **Não vai para o GitHub** (`.gitignore`) |
 | `publicar/` | Pacotes gerados do SincronizadorLV por cliente. **Não vai para o GitHub** |
 

@@ -102,7 +102,7 @@ Tudo a partir da **base de dados de cada cliente**, apresentado de forma acessí
 
 - [ ] Biblioteca de rotinas prontas por tipo de sistema/banco (reaproveitar entre clientes)
 - [ ] DRE comparativo (ano x ano, realizado x orçado) e plano de contas configurável por cliente
-- [x] DRE do cliente piloto: receita pela `viewFaturamentoLV` do ERP (bate com a DRE/E-Diretor); CMV pela nossa regra (reposição médio). SQL em `docs/dre-viewFaturamentoLV-sqlserver.sql`
+- [x] DRE do cliente piloto: receita pela `viewFaturamentoLV` do ERP (bate com a DRE/E-Diretor); CMV pela nossa regra (reposição médio). Depois substituída pela leitura direta nas tabelas (`docs/dre-propria-tabelas-sqlserver.sql`)
 - [ ] CMV do E-Diretor (tela de indicadores do ERP) — calculado no programa, não nas visões; perguntar ao ERP qual custo usa (retomar depois)
 - [ ] Avaliar DRE pela `viewDRE` (estrutura de centros de custo do cliente; filtro Compõe ≠ CC e "Não soma")
 - [ ] Curva ABC de produtos, giro de estoque, produtos abaixo do custo
@@ -159,7 +159,7 @@ Tudo a partir da **base de dados de cada cliente**, apresentado de forma acessí
 ## Etapa 6 — Publicação
 
 - [x] Banco do portal no SQL Server **PORTAL_VG** (login próprio `portal_vogel`; antes chamado BASELV), dados copiados do SQLite em 24/09/2026; empresas com chave Id + impressão do CNPJ (estilo REV_Base)
-- [x] **BASELV no servidor de cada cliente** (opção B, 25/09/2026): só os **resultados** que o portal usa: `LV_Dre`, `LV_Precificacao` e `LV_Sincronizacao` ([docs/criar-baselv-resultados.sql](docs/criar-baselv-resultados.sql)). A cópia das tabelas brutas (opção C) foi descartada por duplicar dados.
+- [x] **BASELV no servidor de cada cliente** (opção B, 25/09/2026): só os **resultados** que o portal usa: `LV_Dre`, `LV_Precificacao` e `LV_Sincronizacao` (hoje em [docs/implantacao/01-criar-baselv.sql](docs/implantacao/01-criar-baselv.sql)). A cópia das tabelas brutas (opção C) foi descartada por duplicar dados.
 - [x] Programa separado **SincronizadorLV** ([src/SincronizadorLV](src/SincronizadorLV/README.md)): roda na BASE os mesmos SQLs do portal (só SELECT) e grava o resultado; CSV opcional para o "Importar CSV/XLSX"; `agendar-tarefa.ps1` para a virada do dia (00:05)
 - [x] Portal: modelos "Usar BASELV (recomendado)" na DRE e na Precificação; cliente "teste" já lê da BASELV
 - [x] cliente piloto: tabelas criadas na BASELV existente do servidor do cliente (as 5 tabelas antigas não foram tocadas)

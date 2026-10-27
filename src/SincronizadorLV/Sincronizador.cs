@@ -441,7 +441,7 @@ public sealed partial class Sincronizador(string origem, string destino, Opcoes 
         await cn.OpenAsync(ct);
         await using var cmd = new SqlCommand("SELECT CASE WHEN OBJECT_ID('LV_Dre') IS NULL OR OBJECT_ID('LV_Precificacao') IS NULL OR OBJECT_ID('LV_Sincronizacao') IS NULL THEN 0 ELSE 1 END", cn);
         if ((int)(await cmd.ExecuteScalarAsync(ct))! == 0)
-            throw new InvalidOperationException("O destino não tem as tabelas LV_Dre, LV_Precificacao e LV_Sincronizacao (rode docs/criar-baselv-resultados.sql). Nada foi gravado.");
+            throw new InvalidOperationException("O destino não tem as tabelas LV_Dre, LV_Precificacao e LV_Sincronizacao (rode docs/implantacao/01-criar-baselv.sql). Nada foi gravado.");
     }
 
     private static async Task<string> IdentificarAsync(string conexao, CancellationToken ct)
